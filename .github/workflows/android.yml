@@ -12,15 +12,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '17.0.20+101'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v6
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
@@ -32,35 +32,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
-      - name: set up JDK 17
-        uses: actions/setup-java@v5
+      - uses: actions/checkout@v7
+      - name: set up JDK 21
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21.0.12+101.0.LTS'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v6
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
-      - name: Lint
-        run: bash ./gradlew lintVitalRelease
+      - name: Spotless check
+        run: bash ./gradlew :app:spotlessCheck
+
+      - name: Detekt
+        run: bash ./gradlew :app:detektDebug
+
+      - name: Android Lint
+        run: bash ./gradlew :app:lintDebug
 
   build:
     name: Generate apk
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '17.0.20+101'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v6
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
@@ -68,14 +74,14 @@ jobs:
         run: bash ./gradlew :app:assembleDebug
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: debug apk
           path: ${{ github.workspace }}/app/build/outputs/apk/debug/*.apk
 
       - name: Update debug tag
         if: (github.event_name == 'push' && github.ref == 'refs/heads/tinydankchat')
-        uses: richardsimko/update-tag@v1.1.6
+        uses: richardsimko/update-tag@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -83,7 +89,7 @@ jobs:
 
       - name: Update debug release
         if: (github.event_name == 'push' && github.ref == 'refs/heads/tinydankchat')
-        uses: ncipollo/release-action@v1.20.0
+        uses: ncipollo/release-action@v1.21.0
         with:
           tag: debug
           name: Debug APK
@@ -97,25 +103,36 @@ jobs:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/tinydankchat')
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '17.0.20+101'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v6
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: Decode Keystore
         id: decode_keystore
-        uses: timheuer/base64-to-file@v1.2
+        uses: timheuer/base64-to-file@v2.0
         with:
           fileName: '/app/keystore/DankChat.jks'
           fileDir: ${{ github.workspace }}
           encodedString: ${{ secrets.SIGNING_KEY }}
+
+      - name: Extract version name
+        id: version
+        run: |
+          base=$(grep 'versionName' app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          short_sha="${GITHUB_SHA::7}"
+          tag="release-v${base}-${short_sha}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "name=Release v${base} (${short_sha})" >> "$GITHUB_OUTPUT"
+          echo "version=${base}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
 
       - name: Build signed release apk
         run: bash ./gradlew app:assembleRelease
@@ -125,22 +142,44 @@ jobs:
           SIGNING_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: Signed release apk
           path: ${{ github.workspace }}/app/build/outputs/apk/release/*.apk
 
-      - name: Update release tag
-        uses: richardsimko/update-tag@v1.1.6
+      - name: Update rolling release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: release
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_NAME: ${{ steps.version.outputs.name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHORT_SHA: ${{ steps.version.outputs.short_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          apk=$(ls ${{ github.workspace }}/app/build/outputs/apk/release/*.apk | head -1)
 
-      - name: Update signed release
-        uses: ncipollo/release-action@v1.20.0
-        with:
-          tag: release
-          name: Signed release APK
-          artifacts: ${{ github.workspace }}/app/build/outputs/apk/release/*.apk
-          allowUpdates: true
+          if ! git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
+          release_id=$(gh api "repos/$REPO/releases" \
+            --jq '.[] | select(.name | startswith("Release")) | .id' | head -1)
+
+          notes="**Version:** \`v${VERSION}\`
+          **Commit:** [\`${SHORT_SHA}\`](https://github.com/${REPO}/commit/${GITHUB_SHA})"
+
+          # GitHub displays the original publish date, so the release is recreated on every build
+          if [ -n "$release_id" ]; then
+            old_tag=$(gh api "repos/$REPO/releases/$release_id" --jq '.tag_name')
+            gh api -X DELETE "repos/$REPO/releases/$release_id"
+            if [ "$old_tag" != "$TAG" ]; then
+              git push origin ":refs/tags/$old_tag" || true
+            fi
+          fi
+
+          gh release create "$TAG" "$apk" \
+            --repo "$REPO" \
+            --title "$RELEASE_NAME" \
+            --notes "$notes" \
+            --latest

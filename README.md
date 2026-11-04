@@ -15,7 +15,7 @@ Make sure to click "install anyway" when a Play Protect dialog pops up during in
 
 ## Features
 
-+ [TinyEmotes](https://github.com/ilotterytea/tinyemotes) support, a self-hosted emote provider
++ [TinyEmotes](https://github.com/shungitescasa/tinyemotes) support, a self-hosted emote provider
 + Client-side message encryption
 
 ## Localization

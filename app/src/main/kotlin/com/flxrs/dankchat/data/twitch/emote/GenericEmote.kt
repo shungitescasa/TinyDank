@@ -10,11 +10,7 @@ data class GenericEmote(
     val isOverlayEmote: Boolean = false,
     val instanceUrl: String? = null
 ) : Comparable<GenericEmote> {
-    override fun toString(): String {
-        return code
-    }
+    override fun toString(): String = code
 
-    override fun compareTo(other: GenericEmote): Int {
-        return code.compareTo(other.code)
-    }
+    override fun compareTo(other: GenericEmote): Int = code.compareTo(other.code)
 }

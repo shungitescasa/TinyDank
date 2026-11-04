@@ -1,7 +1,5 @@
 package com.flxrs.dankchat.data.api.seventv.eventapi
 
-import android.util.Log
-import com.flxrs.dankchat.BuildConfig
 import com.flxrs.dankchat.data.api.seventv.eventapi.dto.AckMessage
 import com.flxrs.dankchat.data.api.seventv.eventapi.dto.DataMessage
 import com.flxrs.dankchat.data.api.seventv.eventapi.dto.DispatchMessage
@@ -15,101 +13,101 @@ import com.flxrs.dankchat.data.api.seventv.eventapi.dto.SubscribeRequest
 import com.flxrs.dankchat.data.api.seventv.eventapi.dto.UnsubscribeRequest
 import com.flxrs.dankchat.data.api.seventv.eventapi.dto.UserDispatchData
 import com.flxrs.dankchat.di.DispatchersProvider
-import com.flxrs.dankchat.di.WebSocketOkHttpClient
+import com.flxrs.dankchat.preferences.battery.BatterySettingsDataStore
 import com.flxrs.dankchat.preferences.chat.ChatSettingsDataStore
-import com.flxrs.dankchat.preferences.chat.LiveUpdatesBackgroundBehavior
 import com.flxrs.dankchat.utils.AppLifecycleListener
 import com.flxrs.dankchat.utils.AppLifecycleListener.AppLifecycle.Background
+import com.flxrs.dankchat.utils.ForegroundServiceState
 import com.flxrs.dankchat.utils.extensions.timer
-import io.ktor.http.HttpHeaders
+import com.flxrs.dankchat.utils.webSocketCoroutineExceptionHandler
+import io.github.oshai.kotlinlogging.KotlinLogging
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
+import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.util.collections.ConcurrentSet
+import io.ktor.websocket.Frame
+import io.ktor.websocket.close
+import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import org.koin.core.annotation.Named
 import org.koin.core.annotation.Single
 import kotlin.random.Random
 import kotlin.random.nextLong
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
+
+private val logger = KotlinLogging.logger("SevenTVEventApiClient")
 
 @Single
 class SevenTVEventApiClient(
-    @Named(type = WebSocketOkHttpClient::class)
-    private val client: OkHttpClient,
+    httpClient: HttpClient,
     private val chatSettingsDataStore: ChatSettingsDataStore,
+    private val batterySettingsDataStore: BatterySettingsDataStore,
     private val appLifecycleListener: AppLifecycleListener,
+    private val foregroundServiceState: ForegroundServiceState,
     defaultJson: Json,
     dispatchersProvider: DispatchersProvider,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + dispatchersProvider.default)
-    private var socket: WebSocket? = null
-    private val request = Request.Builder()
-        .header(HttpHeaders.UserAgent, "dankchat/${BuildConfig.VERSION_NAME}")
-        .url("wss://events.7tv.io/v3")
-        .build()
-
-    private val json = Json(defaultJson) {
-        encodeDefaults = true
-    }
-
-    private var connecting = false
-    private var connected = false
-
-    private var reconnectAttempts = 1
-    private var heartBeatInterval = DEFAULT_HEARTBEAT_INTERVAL
-    private var lastHeartBeat = System.currentTimeMillis()
-    private val currentReconnectDelay: Long
-        get() {
-            val jitter = Random.nextLong(0L..MAX_JITTER)
-            val reconnectDelay = RECONNECT_BASE_DELAY * (1 shl (reconnectAttempts - 1))
-            reconnectAttempts = (reconnectAttempts + 1).coerceAtMost(RECONNECT_MAX_ATTEMPTS)
-
-            return reconnectDelay + jitter
+    private val client =
+        httpClient.config {
+            install(WebSockets)
         }
+
+    private val json =
+        Json(defaultJson) {
+            encodeDefaults = true
+        }
+
+    @Volatile
+    private var session: DefaultClientWebSocketSession? = null
+    private var connectionJob: Job? = null
+
+    @Volatile
+    private var lastHeartBeat: TimeMark = TimeSource.Monotonic.markNow()
 
     private val subscriptions = ConcurrentSet<SubscribeRequest>()
     private val _messages = MutableSharedFlow<SevenTVEventMessage>(extraBufferCapacity = 16)
+
+    private val connected: Boolean
+        get() = session?.isActive == true && session?.incoming?.isClosedForReceive == false
 
     init {
         scope.launch {
             chatSettingsDataStore.debouncedSevenTvLiveEmoteUpdates
                 .collectLatest { enabled ->
                     when {
-                        enabled && !connected && !connecting -> start()
-                        else                                 -> close()
+                        enabled -> start()
+                        else -> close()
                     }
                     if (enabled) {
                         appLifecycleListener.appState
                             .debounce(FLOW_DEBOUNCE)
                             .collectLatest { state ->
                                 if (state == Background) {
-                                    val timeout = when (chatSettingsDataStore.settings.first().sevenTVLiveEmoteUpdatesBehavior) {
-                                        LiveUpdatesBackgroundBehavior.Always        -> return@collectLatest
-                                        LiveUpdatesBackgroundBehavior.Never         -> Duration.ZERO
-                                        LiveUpdatesBackgroundBehavior.FiveMinutes   -> 5.minutes
-                                        LiveUpdatesBackgroundBehavior.OneHour       -> 1.hours
-                                        LiveUpdatesBackgroundBehavior.OneMinute     -> 1.minutes
-                                        LiveUpdatesBackgroundBehavior.ThirtyMinutes -> 30.minutes
+                                    val batterySettings = batterySettingsDataStore.settings.first()
+                                    if (!batterySettings.pauseSevenTvLiveUpdates) {
+                                        return@collectLatest
                                     }
 
-                                    Log.d(TAG, "[7TV Event-Api] Sleeping for $timeout until connection is closed")
+                                    val timeout = batterySettings.backgroundDelay.duration
+                                    logger.debug { "[7TV Event-Api] Sleeping for $timeout until connection is closed" }
                                     delay(timeout)
                                     close()
                                 }
@@ -162,12 +160,12 @@ class SevenTVEventApiClient(
             return
         }
 
-        reconnectAttempts = 1
-        attemptReconnect()
+        close()
+        start()
     }
 
     suspend fun reconnectIfNecessary() {
-        if (!chatSettingsDataStore.settings.first().sevenTVLiveEmoteUpdates || connected || connecting) {
+        if (connected || connectionJob?.isActive == true) {
             return
         }
 
@@ -175,15 +173,22 @@ class SevenTVEventApiClient(
     }
 
     fun close() {
-        connected = false
-        socket?.close(1000, null) ?: socket?.cancel()
-        socket = null
+        val currentSession = session
+        session = null
+        connectionJob?.cancel()
+        scope.launch {
+            runCatching {
+                currentSession?.close()
+                currentSession?.cancel()
+            }
+        }
     }
 
     private fun addSubscription(request: SubscribeRequest) {
         if (subscriptions.add(request) && connected) {
             val encoded = request.encodeOrNull() ?: return
-            socket?.send(encoded)
+            val currentSession = session
+            scope.launch { runCatching { currentSession?.send(Frame.Text(encoded)) } }
         }
     }
 
@@ -191,148 +196,202 @@ class SevenTVEventApiClient(
         val subscription = subscriptions.find { it.d == request.d }
         if (subscriptions.remove(subscription) && connected) {
             val encoded = request.encodeOrNull() ?: return
-            socket?.send(encoded)
+            val currentSession = session
+            scope.launch { runCatching { currentSession?.send(Frame.Text(encoded)) } }
         }
     }
 
     private fun start() {
-        socket = client.newWebSocket(request, EventApiWebSocketListener())
-    }
-
-    private fun attemptReconnect() {
-        scope.launch {
-            delay(currentReconnectDelay)
-            close()
-            start()
-        }
-    }
-
-    private fun setupHeartBeatInterval(): Job = scope.launch {
-        delay(heartBeatInterval)
-        timer(heartBeatInterval) {
-            val webSocket = socket
-            if (webSocket == null || System.currentTimeMillis() - lastHeartBeat > 3 * heartBeatInterval.inWholeMilliseconds) {
-                cancel()
-                reconnect()
-                return@timer
-            }
-        }
-    }
-
-    private inner class EventApiWebSocketListener : WebSocketListener() {
-        private var heartBeatJob: Job? = null
-
-        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            Log.d(TAG, "[7TV Event-Api] connection closed")
-            connected = false
-            heartBeatJob?.cancel()
+        if (connected || connectionJob?.isActive == true) {
+            return
         }
 
-        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            Log.e(TAG, "[7TV Event-Api] connection failed: $t")
-            Log.e(TAG, "[7TV Event-Api] attempting to reconnect #${reconnectAttempts}..")
-            connected = false
-            connecting = false
-            heartBeatJob?.cancel()
+        logger.info { "[7TV Event-Api] connecting" }
+        connectionJob =
+            scope.launch(webSocketCoroutineExceptionHandler("7TV Event-Api")) {
+                var retryCount = 1
+                while (isActive) {
+                    var serverRequestedReconnect = false
+                    try {
+                        client.webSocket(EVENT_API_URL) {
+                            session = this
+                            retryCount = 1
+                            logger.info { "[7TV Event-Api] connected" }
 
-            attemptReconnect()
-        }
+                            var heartBeatJob: Job? = null
+                            try {
+                                while (isActive) {
+                                    val result = incoming.receiveCatching()
+                                    val text =
+                                        when (val frame = result.getOrNull()) {
+                                            null -> {
+                                                val cause = result.exceptionOrNull() ?: return@webSocket
+                                                throw cause
+                                            }
 
-        override fun onOpen(webSocket: WebSocket, response: Response) {
-            connected = true
-            connecting = false
-            reconnectAttempts = 1
-            Log.i(TAG, "[7TV Event-Api] connected")
-        }
+                                            else -> {
+                                                (frame as? Frame.Text)?.readText() ?: continue
+                                            }
+                                        }
 
-        override fun onMessage(webSocket: WebSocket, text: String) {
-            val message = runCatching { json.decodeFromString<DataMessage>(text) }.getOrElse {
-                Log.d(TAG, "Failed to parse incoming message: ", it)
-                return
-            }
+                                    val message =
+                                        runCatching { json.decodeFromString<DataMessage>(text) }.getOrElse {
+                                            logger.debug(it) { "Failed to parse incoming message" }
+                                            continue
+                                        }
 
-            when (message) {
-                is HelloMessage       -> {
-                    heartBeatInterval = message.d.heartBeatInterval.milliseconds
-                    heartBeatJob = setupHeartBeatInterval()
+                                    when (message) {
+                                        is HelloMessage -> {
+                                            lastHeartBeat = TimeSource.Monotonic.markNow()
+                                            heartBeatJob?.cancel()
+                                            heartBeatJob = setupHeartBeatWatchdog(message.d.heartBeatInterval.milliseconds)
 
-                    subscriptions.forEach {
-                        val encoded = it.encodeOrNull() ?: return@forEach
-                        webSocket.send(encoded)
+                                            subscriptions.forEach { subscription ->
+                                                val encoded = subscription.encodeOrNull() ?: return@forEach
+                                                send(Frame.Text(encoded))
+                                            }
+                                        }
+
+                                        is HeartbeatMessage -> {
+                                            lastHeartBeat = TimeSource.Monotonic.markNow()
+                                        }
+
+                                        is DispatchMessage -> {
+                                            message.handleMessage()
+                                        }
+
+                                        is ReconnectMessage -> {
+                                            serverRequestedReconnect = true
+                                            return@webSocket
+                                        }
+
+                                        is EndOfStreamMessage -> Unit
+
+                                        is AckMessage -> Unit
+                                    }
+                                }
+                            } finally {
+                                heartBeatJob?.cancel()
+                            }
+                        }
+
+                        session = null
+                        if (!foregroundServiceState.active.value) {
+                            logger.info { "[7TV Event-Api] connection closed, foreground service inactive, not reconnecting" }
+                            return@launch
+                        }
+
+                        when {
+                            serverRequestedReconnect -> logger.info { "[7TV Event-Api] reconnecting after server request" }
+
+                            else -> {
+                                // Graceful server close (close frame/END_OF_STREAM). Reconnecting is allowed here because
+                                // the background limit collector cancels this loop via close() once the limit expires.
+                                logger.info { "[7TV Event-Api] connection closed by server, reconnecting" }
+                                delay(RECONNECT_BASE_DELAY + randomJitter())
+                            }
+                        }
+                    } catch (t: CancellationException) {
+                        throw t
+                    } catch (t: Throwable) {
+                        logger.error { "[7TV Event-Api] connection failed: $t" }
+                        session = null
+
+                        if (!foregroundServiceState.active.value) {
+                            logger.info { "[7TV Event-Api] foreground service inactive, not retrying" }
+                            return@launch
+                        }
+
+                        logger.info { "[7TV Event-Api] attempting to reconnect #$retryCount.." }
+                        val reconnectDelay = RECONNECT_BASE_DELAY * (1 shl (retryCount - 1))
+                        delay(reconnectDelay + randomJitter())
+                        retryCount = (retryCount + 1).coerceAtMost(RECONNECT_MAX_ATTEMPTS)
                     }
                 }
-
-                is HeartbeatMessage   -> lastHeartBeat = System.currentTimeMillis()
-                is DispatchMessage    -> message.handleMessage()
-                is ReconnectMessage   -> scope.launch { reconnect() }
-                is EndOfStreamMessage -> Unit
-                is AckMessage         -> Unit
             }
-        }
-
     }
+
+    private fun setupHeartBeatWatchdog(interval: Duration): Job = scope.timer(interval) {
+        if (lastHeartBeat.elapsedNow() > interval * 3) {
+            logger.info { "[7TV Event-Api] missed heartbeats, reconnecting" }
+            cancel()
+            reconnect()
+        }
+    }
+
+    private fun randomJitter() = Random.nextLong(range = 0L..MAX_JITTER).milliseconds
 
     private fun DispatchMessage.handleMessage() {
         when (d) {
-            is EmoteSetDispatchData -> with(d.body) {
-                val emoteSetId = id
-                val actorName = actor.displayName
-                val added = pushed?.mapNotNull {
-                    it.value ?: return@mapNotNull null
-
-                }
-                val removed = pulled?.mapNotNull {
-                    val removedData = it.oldValue ?: return@mapNotNull null
-                    SevenTVEventMessage.EmoteSetUpdated.RemovedEmote(removedData.id, removedData.name)
-                }
-                val updated = updated?.mapNotNull {
-                    val newData = it.value ?: return@mapNotNull null
-                    val oldData = it.oldValue ?: return@mapNotNull null
-                    SevenTVEventMessage.EmoteSetUpdated.UpdatedEmote(newData.id, newData.name, oldData.name)
-                }
-                scope.launch {
-                    _messages.emit(
-                        SevenTVEventMessage.EmoteSetUpdated(
-                            emoteSetId = emoteSetId,
-                            actorName = actorName,
-                            added = added.orEmpty(),
-                            removed = removed.orEmpty(),
-                            updated = updated.orEmpty(),
+            is EmoteSetDispatchData -> {
+                with(d.body) {
+                    val emoteSetId = id
+                    val actorName = actor.displayName
+                    val added =
+                        pushed?.mapNotNull {
+                            it.value ?: return@mapNotNull null
+                        }
+                    val removed =
+                        pulled?.mapNotNull {
+                            val removedData = it.oldValue ?: return@mapNotNull null
+                            SevenTVEventMessage.EmoteSetUpdated.RemovedEmote(removedData.id, removedData.name)
+                        }
+                    val updated =
+                        updated?.mapNotNull {
+                            val newData = it.value ?: return@mapNotNull null
+                            val oldData = it.oldValue ?: return@mapNotNull null
+                            SevenTVEventMessage.EmoteSetUpdated.UpdatedEmote(newData.id, newData.name, oldData.name)
+                        }
+                    scope.launch {
+                        _messages.emit(
+                            SevenTVEventMessage.EmoteSetUpdated(
+                                emoteSetId = emoteSetId,
+                                actorName = actorName,
+                                added = added.orEmpty(),
+                                removed = removed.orEmpty(),
+                                updated = updated.orEmpty(),
+                            ),
                         )
-                    )
+                    }
                 }
             }
 
-            is UserDispatchData     -> with(d.body) {
-                val actorName = actor.displayName
-                updated?.forEach { change ->
-                    val index = change.index
-                    val emoteSetChange = change.value?.filterIsInstance<EmoteSetChangeField>()?.firstOrNull() ?: return
-                    scope.launch {
-                        _messages.emit(
-                            SevenTVEventMessage.UserUpdated(
-                                actorName = actorName,
-                                connectionIndex = index,
-                                emoteSetId = emoteSetChange.value.id,
-                                oldEmoteSetId = emoteSetChange.oldValue.id
+            is UserDispatchData -> {
+                with(d.body) {
+                    val actorName = actor.displayName
+                    updated?.forEach { change ->
+                        val index = change.index
+                        val emoteSetChange = change.value?.filterIsInstance<EmoteSetChangeField>()?.firstOrNull() ?: return
+                        scope.launch {
+                            _messages.emit(
+                                SevenTVEventMessage.UserUpdated(
+                                    actorName = actorName,
+                                    connectionIndex = index,
+                                    emoteSetId = emoteSetChange.value.id,
+                                    oldEmoteSetId = emoteSetChange.oldValue.id,
+                                ),
                             )
-                        )
+                        }
                     }
                 }
             }
         }
     }
 
-    private inline fun <reified T> T.encodeOrNull(): String? {
-        return runCatching { json.encodeToString(this) }.getOrNull()
-    }
+    private inline fun <reified T> T.encodeOrNull(): String? = runCatching { json.encodeToString(this) }.getOrNull()
+
+    data class Status(
+        val connected: Boolean,
+        val subscriptionCount: Int,
+    )
+
+    fun status(): Status = Status(connected = connected, subscriptionCount = subscriptions.size)
 
     companion object {
+        private const val EVENT_API_URL = "wss://events.7tv.io/v3"
         private const val MAX_JITTER = 250L
-        private const val RECONNECT_BASE_DELAY = 1_000L
+        private val RECONNECT_BASE_DELAY = 1.seconds
         private const val RECONNECT_MAX_ATTEMPTS = 6
-        private val DEFAULT_HEARTBEAT_INTERVAL = 25.seconds
         private val FLOW_DEBOUNCE = 2.seconds
-        private val TAG = SevenTVEventApiClient::class.java.simpleName
     }
 }

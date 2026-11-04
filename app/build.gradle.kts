@@ -1,37 +1,37 @@
-@file:Suppress("UnstableApiUsage")
-
+import com.android.build.api.artifact.ArtifactTransformationRequest
+import com.android.build.api.artifact.SingleArtifact
 import com.android.build.gradle.internal.PropertiesValueSource
-import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.io.StringReader
 import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.nav.safeargs.kotlin)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.koin.compiler)
     alias(libs.plugins.about.libraries.android)
+    alias(libs.plugins.android.junit5)
+    alias(libs.plugins.baselineprofile)
+    alias(libs.plugins.spotless)
+    alias(libs.plugins.detekt)
 }
 
 android {
     namespace = "com.flxrs.dankchat"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.flxrs.dankchat"
-        minSdk = 23
-        targetSdk = 35
-        versionCode = 31110
-        versionName = "3.11.10"
+        minSdk = 30
+        targetSdk = 36
+        versionCode = 40043
+        versionName = "4.0.43"
     }
 
-    androidResources {
-        generateLocaleConfig = true
-    }
+    androidResources { generateLocaleConfig = true }
 
     val localProperties = gradleLocalProperties(rootDir, providers)
     signingConfigs {
@@ -43,11 +43,6 @@ android {
         }
     }
 
-    sourceSets {
-        getByName("main") {
-            java.srcDir("src/main/kotlin")
-        }
-    }
     buildFeatures {
         viewBinding = true
         buildConfig = true
@@ -59,6 +54,8 @@ android {
             excludes += "META-INF/versions/9/previous-compilation-data.bin"
         }
     }
+
+    testOptions { unitTests.isReturnDefaultValues = true }
 
     buildTypes {
         getByName("release") {
@@ -73,52 +70,63 @@ android {
             manifestPlaceholders["applicationLabel"] = "@string/app_name"
         }
         create("dank") {
-            initWith(getByName("debug"))
+            initWith(getByName("release"))
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             manifestPlaceholders["applicationLabel"] = "@string/app_name_dank"
             applicationIdSuffix = ".dank"
             isDefault = true
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
         }
     }
 
-    buildOutputs.all {
-        (this as? BaseVariantOutputImpl)?.apply {
-            val appName = "DankChat-${name}.apk"
-            outputFileName = appName
-        }
+    androidComponents.onVariants { variant ->
+        val renameTask = tasks.register<RenameApkTask>("renameApk${variant.name.replaceFirstChar { it.uppercase() }}") { apkName.set("DankChat-${variant.name}.apk") }
+        val transformationRequest =
+            variant.artifacts
+                .use(renameTask)
+                .wiredWithDirectories(RenameApkTask::inputDirs, RenameApkTask::outputDirs)
+                .toTransformMany(SingleArtifact.APK)
+        renameTask.configure { this.transformationRequest = transformationRequest }
     }
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
-    //noinspection WrongGradleMethod
-    androidComponents {
-        beforeVariants {
-            sourceSets.named("main") {
-                java.srcDir(File("build/generated/ksp/${it.name}/kotlin"))
-            }
-        }
+    lint {
+        disable += "RestrictedApi"
+        disable += "UnusedResources"
+        disable += "ObsoleteSdkInt"
+        disable += "PictureInPictureIssue"
+        disable += "OldTargetApi"
+        disable += "GradleDependency"
+        disable += "NewerVersionAvailable"
     }
 }
 
 ksp {
     arg("room.schemaLocation", "${layout.projectDirectory}/schemas")
-    arg("KOIN_CONFIG_CHECK", "true")
-    arg("KOIN_DEFAULT_MODULE", "false")
-    arg("KOIN_USE_COMPOSE_VIEWMODEL", "true")
 }
 
-tasks.withType<Test> {
-    useJUnitPlatform()
+koinCompiler {
+    compileSafety = true
 }
+
+baselineProfile {
+    // Write the generated profile to src/main so it applies to all variants
+    mergeIntoMain = true
+    saveInSrc = true
+}
+
+tasks.withType<Test> { useJUnitPlatform() }
 
 kotlin {
-    jvmToolchain(jdkVersion = 17)
+    jvmToolchain(jdkVersion = 21)
     compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
+        jvmTarget.set(JvmTarget.JVM_21)
         freeCompilerArgs.addAll(
             "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
             "-opt-in=kotlinx.coroutines.FlowPreview",
@@ -129,17 +137,19 @@ kotlin {
             "-opt-in=androidx.compose.foundation.layout.ExperimentalLayoutApi",
             "-opt-in=kotlin.uuid.ExperimentalUuidApi",
             "-opt-in=kotlin.time.ExperimentalTime",
-            "-Xnon-local-break-continue",
-            "-Xwhen-guards",
+            "-opt-in=kotlin.concurrent.atomics.ExperimentalAtomicApi",
         )
     }
 }
 
 dependencies {
-// D8 desugaring
+    // Detekt plugins
+    detektPlugins(libs.detekt.compose.rules)
+
+    // D8 desugaring
     coreLibraryDesugaring(libs.android.desugar.libs)
 
-// Kotlin
+    // Kotlin
     implementation(libs.kotlin.stdlib)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
@@ -148,25 +158,17 @@ dependencies {
     implementation(libs.kotlinx.datetime)
     implementation(libs.kotlinx.immutable.collections)
 
-// AndroidX
+    // AndroidX
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.browser)
-    implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.emoji2)
     implementation(libs.androidx.exifinterface)
-    implementation(libs.androidx.fragment.ktx)
-    implementation(libs.androidx.transition.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
-    implementation(libs.androidx.media)
-    implementation(libs.androidx.navigation.fragment.ktx)
-    implementation(libs.androidx.navigation.ui.ktx)
     implementation(libs.androidx.navigation.compose)
-    implementation(libs.androidx.recyclerview)
-    implementation(libs.androidx.viewpager2)
     implementation(libs.androidx.webkit)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.datastore.core)
@@ -174,7 +176,7 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
-// Compose
+    // Compose
     implementation(libs.compose.animation)
     implementation(libs.compose.foundation)
     implementation(libs.compose.material3)
@@ -186,60 +188,136 @@ dependencies {
     implementation(libs.compose.icons.core)
     implementation(libs.compose.icons.extended)
     implementation(libs.compose.unstyled)
+    implementation(libs.lazycolumn.scrollbar)
+    implementation(libs.compose.material3.adaptive)
 
-// Material
-    implementation(libs.android.material)
+    // Baseline profile
+    implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":baselineprofile"))
+
+    // Theme & splash
+    implementation(libs.appcompat)
+    implementation(libs.splashscreen)
     implementation(libs.android.flexbox)
 
-// Dependency injection
+    // Dependency injection
     implementation(platform(libs.koin.bom))
     implementation(libs.koin.core)
     implementation(libs.koin.android)
     implementation(libs.koin.compose)
     implementation(libs.koin.compose.viewmodel)
     implementation(libs.koin.annotations)
-    implementation(libs.koin.ksp.compiler)
-    ksp(libs.koin.ksp.compiler)
 
-// Image loading
+    // Image loading
     implementation(libs.coil)
     implementation(libs.coil.gif)
     implementation(libs.coil.ktor)
     implementation(libs.coil.cache.control)
     implementation(libs.coil.compose)
 
-// HTTP clients
+    // HTTP clients
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.logging)
     implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.client.websockets)
     implementation(libs.ktor.serialization.kotlinx.json)
 
-// Other
-    implementation(libs.colorpicker.android)
+    // Other
+    implementation(libs.colorpicker.compose)
+    implementation(libs.materialkolor)
     implementation(libs.process.phoenix)
+    implementation(libs.logback.android)
+    implementation(libs.kotlin.logging)
     implementation(libs.autolinktext)
     implementation(libs.aboutlibraries.compose.m3)
+    implementation(libs.reorderable)
 
-// Test
+    // Test
     testImplementation(libs.junit.jupiter.api)
-    testImplementation(libs.junit.jupiter.engine)
+    testRuntimeOnly(libs.junit.jupiter.engine)
     testImplementation(libs.mockk)
     testImplementation(libs.kotlin.test)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.turbine)
+    testImplementation(libs.ktor.client.okhttp)
+    testImplementation(libs.ktor.client.websockets)
+    testImplementation(libs.okhttp.mockwebserver)
 }
 
-fun gradleLocalProperties(projectRootDir: File, providers: ProviderFactory): Properties {
-    val properties = Properties()
-    val propertiesContent =
-        providers.of(PropertiesValueSource::class.java) {
-            parameters.projectRoot.set(projectRootDir)
-        }.get()
-
-    StringReader(propertiesContent).use { reader ->
-        properties.load(reader)
+junitPlatform {
+    filters {
+        if (!project.hasProperty("includeIntegration")) {
+            excludeTags("integration")
+        }
     }
+}
+
+spotless {
+    kotlin {
+        target("src/**/*.kt")
+        targetExclude("${layout.buildDirectory}/**/*.kt")
+        ktlint(libs.versions.ktlint.get())
+            .editorConfigOverride(
+                mapOf(
+                    "ktlint_function_naming_ignore_when_annotated_with" to "Composable",
+                    "ktlint_standard_backing-property-naming" to "disabled",
+                    "ktlint_standard_filename" to "disabled",
+                    "ktlint_standard_property-naming" to "disabled",
+                    "ktlint_standard_multiline-expression-wrapping" to "disabled",
+                    "ktlint_standard_when-entry-bracing" to "disabled",
+                    "ktlint_function_signature_body_expression_wrapping" to "default",
+                ),
+            )
+    }
+    kotlinGradle {
+        target("*.gradle.kts")
+        ktlint(libs.versions.ktlint.get())
+    }
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom("$projectDir/config/detekt.yml")
+    parallel = true
+}
+
+tasks.withType<dev.detekt.gradle.Detekt>().configureEach {
+    exclude {
+        it.file.absolutePath.contains("/build/generated/")
+    }
+}
+
+fun gradleLocalProperties(
+    projectRootDir: File,
+    providers: ProviderFactory,
+): Properties {
+    val properties = Properties()
+    val propertiesContent = providers.of(PropertiesValueSource::class.java) { parameters.projectRoot.set(projectRootDir) }.get()
+
+    StringReader(propertiesContent).use { reader -> properties.load(reader) }
 
     return properties
+}
+
+abstract class RenameApkTask : DefaultTask() {
+    @get:InputDirectory abstract val inputDirs: DirectoryProperty
+
+    @get:OutputDirectory abstract val outputDirs: DirectoryProperty
+
+    @get:Input abstract val apkName: Property<String>
+
+    @get:Internal lateinit var transformationRequest: ArtifactTransformationRequest<RenameApkTask>
+
+    @TaskAction
+    fun taskAction() {
+        transformationRequest.submit(this) { builtArtifact ->
+            val inputFile = File(builtArtifact.outputFile)
+            val outputFile = File(outputDirs.get().asFile, apkName.get())
+            inputFile.copyTo(outputFile, overwrite = true)
+            outputFile
+        }
+    }
 }

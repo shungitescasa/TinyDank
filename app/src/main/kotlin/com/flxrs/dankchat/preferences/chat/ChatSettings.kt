@@ -9,14 +9,17 @@ import kotlin.uuid.Uuid
 
 @Serializable
 data class ChatSettings(
-    val suggestions: Boolean = true,
-    val preferEmoteSuggestions: Boolean = false,
-    val supibotSuggestions: Boolean = false,
+    val suggestionTypes: List<SuggestionType> = SuggestionType.DEFAULT,
+    val suggestionMode: SuggestionMode = SuggestionMode.Automatic,
+    val suggestionsMigrated: Boolean = false,
+    @Deprecated("Migrated to suggestionTypes") val suggestions: Boolean = true,
+    @Deprecated("Migrated to suggestionTypes") val supibotSuggestions: Boolean = false,
     val customCommands: List<CustomCommand> = emptyList(),
     val animateGifs: Boolean = true,
     val scrollbackLength: Int = 500,
     val showUsernames: Boolean = true,
     val userLongClickBehavior: UserLongClickBehavior = UserLongClickBehavior.MentionsUser,
+    val colorizeNicknames: Boolean = true,
     val showTimedOutMessages: Boolean = true,
     val showTimestamps: Boolean = true,
     val timestampFormat: String = DEFAULT_TIMESTAMP_FORMAT,
@@ -24,10 +27,12 @@ data class ChatSettings(
     val visibleEmotes: List<VisibleThirdPartyEmotes> = VisibleThirdPartyEmotes.entries,
     val allowUnlistedSevenTvEmotes: Boolean = false,
     val sevenTVLiveEmoteUpdates: Boolean = true,
-    val sevenTVLiveEmoteUpdatesBehavior: LiveUpdatesBackgroundBehavior = LiveUpdatesBackgroundBehavior.FiveMinutes,
+    @Deprecated("Migrated to BatterySettings.pauseSevenTvLiveUpdates") val sevenTVLiveEmoteUpdatesBehavior: LiveUpdatesBackgroundBehavior = LiveUpdatesBackgroundBehavior.FiveMinutes,
     val loadMessageHistory: Boolean = true,
     val loadMessageHistoryOnReconnect: Boolean = true,
     val showChatModes: Boolean = true,
+    val alwaysShowPinnedMessage: Boolean = false,
+    val showStreamTitleInLiveMessage: Boolean = false,
     val sharedChatMigration: Boolean = false,
     val enableMessageEncryption: Boolean = false,
     val encryptOnSend: Boolean = false,
@@ -36,7 +41,6 @@ data class ChatSettings(
     val encryptionEncoding: ChatEncryption.Encoding = ChatEncryption.Encoding.Hebrew,
     val tinyInstances: List<TinyInstance> = emptyList()
 ) {
-
     @Transient
     val visibleBadgeTypes = visibleBadges.map { BadgeType.entries[it.ordinal] }
 
@@ -49,7 +53,24 @@ data class ChatSettings(
 }
 
 @Serializable
-data class CustomCommand(val trigger: String, val command: String, @Transient val id: String = Uuid.random().toString())
+data class CustomCommand(
+    val trigger: String,
+    val command: String,
+    @Transient val id: String = Uuid.random().toString(),
+)
+
+@Serializable
+enum class SuggestionType {
+    Emotes,
+    Users,
+    Commands,
+    SupibotCommands,
+    ;
+
+    companion object {
+        val DEFAULT = listOf(Emotes, Users, Commands)
+    }
+}
 
 @Serializable
 data class TinyInstance(@Transient val id: String = Uuid.random().toString(), val url: String, val channelEmotes: Boolean, val globalEmotes: Boolean)
@@ -73,6 +94,12 @@ enum class VisibleThirdPartyEmotes {
     FFZ,
     BTTV,
     SevenTV,
+}
+
+@Serializable
+enum class SuggestionMode {
+    Automatic,
+    PrefixOnly,
 }
 
 enum class LiveUpdatesBackgroundBehavior {

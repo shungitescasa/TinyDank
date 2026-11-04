@@ -12,21 +12,24 @@ import okio.BufferedSource
 class DataStoreKotlinxSerializer<T>(
     override val defaultValue: T,
     private val serializer: KSerializer<T>,
-    private val customSerializersModule: SerializersModule? = null,
+    customSerializersModule: SerializersModule? = null,
 ) : OkioSerializer<T> {
-
-    private val json = Json {
-        ignoreUnknownKeys = true
-        customSerializersModule?.let {
-            serializersModule = it
+    private val json =
+        Json {
+            ignoreUnknownKeys = true
+            customSerializersModule?.let {
+                serializersModule = it
+            }
         }
-    }
 
     override suspend fun readFrom(source: BufferedSource): T = runCatching {
         json.decodeFromBufferedSource(serializer, source)
     }.getOrDefault(defaultValue)
 
-    override suspend fun writeTo(t: T, sink: BufferedSink) {
+    override suspend fun writeTo(
+        t: T,
+        sink: BufferedSink,
+    ) {
         json.encodeToBufferedSink(serializer, t, sink)
     }
 }

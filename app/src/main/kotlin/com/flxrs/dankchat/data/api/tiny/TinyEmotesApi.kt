@@ -7,7 +7,7 @@ import io.ktor.client.request.get
 
 class TinyEmotesApi(private val ktorClient: HttpClient) {
 
-    suspend fun getUser(instanceUrl: String, channelId: UserId) = ktorClient.get("${instanceUrl.withLeadingHttps}/users.php?alias_id=$channelId")
+    suspend fun getUser(instanceUrl: String, channelId: UserId) = ktorClient.get("${instanceUrl.withLeadingHttps}/users/twitch/$channelId")
 
-    suspend fun getGlobalEmoteset(instanceUrl: String) = ktorClient.get("${instanceUrl.withLeadingHttps}/emotesets/?id=global")
+    suspend fun getGlobalEmoteset(instanceUrl: String) = ktorClient.get("${instanceUrl.withLeadingHttps}/emotesets/global")
 }

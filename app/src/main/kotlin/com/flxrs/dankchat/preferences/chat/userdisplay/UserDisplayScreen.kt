@@ -1,25 +1,35 @@
 package com.flxrs.dankchat.preferences.chat.userdisplay
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeGestures
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -44,9 +54,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -57,21 +67,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LifecycleStartEffect
 import com.flxrs.dankchat.R
 import com.flxrs.dankchat.data.twitch.message.Message
 import com.flxrs.dankchat.preferences.components.CheckboxWithText
 import com.flxrs.dankchat.preferences.components.DankBackground
 import com.flxrs.dankchat.preferences.components.NavigationBarSpacer
+import com.flxrs.dankchat.utils.compose.HexColorPicker
 import com.flxrs.dankchat.utils.compose.SwipeToDelete
-import com.rarepebble.colorpicker.ColorPickerView
+import com.flxrs.dankchat.utils.compose.rememberModalSheetState
 import kotlinx.coroutines.flow.collectLatest
 import org.koin.compose.viewmodel.koinViewModel
 
@@ -80,7 +89,7 @@ fun UserDisplayScreen(onNavBack: () -> Unit) {
     val viewModel = koinViewModel<UserDisplayViewModel>()
     val events = remember(viewModel) { UserDisplayEventsWrapper(viewModel.events) }
 
-    LaunchedEffect(Unit) {
+    SideEffect(Unit) {
         viewModel.fetchUserDisplays()
     }
 
@@ -105,32 +114,34 @@ private fun UserDisplayScreen(
     onAdd: (UserDisplayItem, Int) -> Unit,
     onNavBack: () -> Unit,
 ) {
-    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val snackbarHost = remember { SnackbarHostState() }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val listState = rememberLazyListState()
+    val itemRemovedMsg = stringResource(R.string.item_removed)
+    val undoMsg = stringResource(R.string.undo)
 
     LaunchedEffect(eventsWrapper) {
         eventsWrapper.events.collectLatest {
             focusManager.clearFocus()
             when (it) {
                 is UserDisplayEvent.ItemRemoved -> {
-                    val result = snackbarHost.showSnackbar(
-                        message = context.getString(R.string.item_removed),
-                        actionLabel = context.getString(R.string.undo),
-                        duration = SnackbarDuration.Short,
-                    )
+                    val result =
+                        snackbarHost.showSnackbar(
+                            message = itemRemovedMsg,
+                            actionLabel = undoMsg,
+                            duration = SnackbarDuration.Short,
+                        )
                     if (result == SnackbarResult.ActionPerformed) {
                         onAdd(it.item, it.position)
                     }
                 }
 
-                is UserDisplayEvent.ItemAdded   -> {
+                is UserDisplayEvent.ItemAdded -> {
                     when {
                         it.isLast && listState.canScrollForward -> listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
-                        it.isLast                               -> listState.requestScrollToItem(listState.layoutInfo.totalItemsCount - 1)
-                        else                                    -> listState.animateScrollToItem(it.position)
+                        it.isLast -> listState.requestScrollToItem(listState.layoutInfo.totalItemsCount - 1)
+                        else -> listState.animateScrollToItem(it.position)
                     }
                 }
             }
@@ -145,9 +156,10 @@ private fun UserDisplayScreen(
 
     Scaffold(
         contentWindowInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.navigationBars),
-        modifier = Modifier
-            .nestedScroll(scrollBehavior.nestedScrollConnection)
-            .imePadding(),
+        modifier =
+            Modifier
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .imePadding(),
         snackbarHost = { SnackbarHost(snackbarHost) },
         topBar = {
             TopAppBar(
@@ -161,7 +173,7 @@ private fun UserDisplayScreen(
                         },
                         content = { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back)) },
                     )
-                }
+                },
             )
         },
         floatingActionButton = {
@@ -169,9 +181,10 @@ private fun UserDisplayScreen(
                 ExtendedFloatingActionButton(
                     text = { Text(stringResource(R.string.multi_entry_add_entry)) },
                     icon = { Icon(imageVector = Icons.Default.Add, contentDescription = stringResource(R.string.multi_entry_add_entry)) },
-                    modifier = Modifier
-                        .navigationBarsPadding()
-                        .padding(8.dp),
+                    modifier =
+                        Modifier
+                            .navigationBarsPadding()
+                            .padding(8.dp),
                     onClick = onAddNew,
                 )
             }
@@ -181,22 +194,24 @@ private fun UserDisplayScreen(
         DankBackground(visible = userDisplays.isEmpty())
         LazyColumn(
             state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(start = 16.dp, end = 16.dp, top = 16.dp),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp),
         ) {
-            itemsIndexed(userDisplays, key = { _, it -> it.id }) { idx, item ->
+            itemsIndexed(userDisplays, key = { _, display -> display.id }) { idx, item ->
                 UserDisplayItem(
                     item = item,
                     onChange = { userDisplays[idx] = it },
                     onRemove = { onRemove(userDisplays[idx]) },
-                    modifier = Modifier
-                        .padding(bottom = 16.dp)
-                        .animateItem(
-                            fadeInSpec = null,
-                            fadeOutSpec = null,
-                        ),
+                    modifier =
+                        Modifier
+                            .padding(bottom = 16.dp)
+                            .animateItem(
+                                fadeInSpec = null,
+                                fadeOutSpec = null,
+                            ),
                 )
             }
             item(key = "spacer") {
@@ -218,9 +233,10 @@ private fun UserDisplayItem(
         ElevatedCard {
             Row {
                 Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(16.dp),
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .padding(16.dp),
                 ) {
                     OutlinedTextField(
                         modifier = Modifier.fillMaxWidth(),
@@ -273,42 +289,48 @@ private fun UserDisplayItem(
                         )
                         if (showColorPicker) {
                             ModalBottomSheet(
-                                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                                sheetState = rememberModalSheetState(),
                                 onDismissRequest = {
                                     onChange(item.copy(color = selectedColor))
                                     showColorPicker = false
                                 },
+                                // The column pads the navigation bar itself, so the keyboard inset must not count it twice
+                                contentWindowInsets = { WindowInsets.statusBars.union(WindowInsets.ime.exclude(WindowInsets.navigationBars)) },
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                             ) {
-                                Text(
-                                    text = stringResource(R.string.pick_custom_user_color_title),
-                                    textAlign = TextAlign.Center,
-                                    style = MaterialTheme.typography.titleLarge,
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
-                                )
-                                TextButton(
-                                    onClick = { selectedColor = Message.DEFAULT_COLOR },
-                                    content = { Text(stringResource(R.string.reset)) },
-                                    modifier = Modifier
-                                        .align(Alignment.End)
-                                        .padding(horizontal = 16.dp),
-                                )
-                                AndroidView(
-                                    factory = { context ->
-                                        ColorPickerView(context).apply {
-                                            showAlpha(false)
-                                            setOriginalColor(item.color)
-                                            setCurrentColor(selectedColor)
-                                            addColorObserver {
-                                                selectedColor = it.color
-                                            }
-                                        }
-                                    },
-                                    update = {
-                                        it.setCurrentColor(selectedColor)
+                                        .verticalScroll(rememberScrollState())
+                                        .windowInsetsPadding(
+                                            WindowInsets(left = 16.dp, right = 16.dp)
+                                                .union(WindowInsets.safeGestures.only(WindowInsetsSides.Horizontal)),
+                                        ).navigationBarsPadding(),
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.pick_custom_user_color_title),
+                                        textAlign = TextAlign.Center,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 8.dp),
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                                    ) {
+                                        TextButton(
+                                            onClick = { selectedColor = Message.DEFAULT_COLOR },
+                                            content = { Text(stringResource(R.string.reset)) },
+                                        )
                                     }
-                                )
+                                    HexColorPicker(
+                                        color = selectedColor,
+                                        showAlpha = false,
+                                        onColorChange = { selectedColor = it },
+                                    )
+                                    Spacer(Modifier.height(16.dp))
+                                }
                             }
                         }
                     }
@@ -316,11 +338,9 @@ private fun UserDisplayItem(
                 IconButton(
                     modifier = Modifier.align(Alignment.Top),
                     onClick = onRemove,
-                    content = { Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.remove_custom_user_display)) }
+                    content = { Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.remove_custom_user_display)) },
                 )
             }
         }
     }
 }
-
-

@@ -2,9 +2,12 @@ package com.flxrs.dankchat.preferences.chat
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
@@ -19,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -50,11 +54,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flxrs.dankchat.R
-import com.flxrs.dankchat.chat.ChatEncryption
 import com.flxrs.dankchat.preferences.components.ExpandablePreferenceItem
+import com.flxrs.dankchat.chat.ChatEncryption
 import com.flxrs.dankchat.preferences.components.NavigationBarSpacer
 import com.flxrs.dankchat.preferences.components.PreferenceCategory
 import com.flxrs.dankchat.preferences.components.PreferenceItem
@@ -62,6 +65,7 @@ import com.flxrs.dankchat.preferences.components.PreferenceListDialog
 import com.flxrs.dankchat.preferences.components.PreferenceMultiListDialog
 import com.flxrs.dankchat.preferences.components.SliderPreferenceItem
 import com.flxrs.dankchat.preferences.components.SwitchPreferenceItem
+import com.flxrs.dankchat.utils.extensions.dp
 import com.jakewharton.processphoenix.ProcessPhoenix
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
@@ -73,6 +77,7 @@ import kotlin.math.roundToInt
 fun ChatSettingsScreen(
     onNavToCommands: () -> Unit,
     onNavToUserDisplays: () -> Unit,
+    onNavToBattery: () -> Unit,
     onNavToInstances: () -> Unit,
     onNavBack: () -> Unit,
 ) {
@@ -90,7 +95,7 @@ fun ChatSettingsScreen(
                     val result = snackbarHostState.showSnackbar(
                         message = restartRequiredTitle,
                         actionLabel = restartRequiredAction,
-                        duration = SnackbarDuration.Long,
+                        duration = SnackbarDuration.Short,
                     )
                     if (result == SnackbarResult.ActionPerformed) {
                         ProcessPhoenix.triggerRebirth(context)
@@ -106,6 +111,7 @@ fun ChatSettingsScreen(
         onInteraction = { viewModel.onInteraction(it) },
         onNavToCommands = onNavToCommands,
         onNavToUserDisplays = onNavToUserDisplays,
+        onNavToBattery = onNavToBattery,
         onNavToInstances = onNavToInstances,
         onNavBack = onNavBack,
     )
@@ -118,6 +124,7 @@ private fun ChatSettingsScreen(
     onInteraction: (ChatSettingsInteraction) -> Unit,
     onNavToCommands: () -> Unit,
     onNavToUserDisplays: () -> Unit,
+    onNavToBattery: () -> Unit,
     onNavToInstances: () -> Unit,
     onNavBack: () -> Unit,
 ) {
@@ -135,31 +142,44 @@ private fun ChatSettingsScreen(
                         onClick = onNavBack,
                         content = { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back)) },
                     )
-                }
+                },
             )
-        }
+        },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState()),
         ) {
-            GeneralCategory(
-                suggestions = settings.suggestions,
-                preferEmoteSuggestions = settings.preferEmoteSuggestions,
-                supibotSuggestions = settings.supibotSuggestions,
-                animateGifs = settings.animateGifs,
+            SuggestionsCategory(
+                suggestionTypes = settings.suggestionTypes,
+                suggestionMode = settings.suggestionMode,
+                onNavToCommands = onNavToCommands,
+                onInteraction = onInteraction,
+            )
+            HorizontalDivider(thickness = Dp.Hairline)
+            MessagesCategory(
                 scrollbackLength = settings.scrollbackLength,
-                showUsernames = settings.showUsernames,
-                userLongClickBehavior = settings.userLongClickBehavior,
                 showTimedOutMessages = settings.showTimedOutMessages,
                 showTimestamps = settings.showTimestamps,
                 timestampFormat = settings.timestampFormat,
+                onInteraction = onInteraction,
+            )
+            HorizontalDivider(thickness = Dp.Hairline)
+            UsersCategory(
+                showUsernames = settings.showUsernames,
+                userLongClickBehavior = settings.userLongClickBehavior,
+                colorizeNicknames = settings.colorizeNicknames,
+                onNavToUserDisplays = onNavToUserDisplays,
+                onInteraction = onInteraction,
+            )
+            HorizontalDivider(thickness = Dp.Hairline)
+            EmotesAndBadgesCategory(
+                animateGifs = settings.animateGifs,
                 visibleBadges = settings.visibleBadges,
                 visibleEmotes = settings.visibleEmotes,
-                onNavToCommands = onNavToCommands,
-                onNavToUserDisplays = onNavToUserDisplays,
                 onInteraction = onInteraction,
             )
             HorizontalDivider(thickness = Dp.Hairline)
@@ -167,8 +187,8 @@ private fun ChatSettingsScreen(
                 enabled = VisibleThirdPartyEmotes.SevenTV in settings.visibleEmotes,
                 allowUnlistedSevenTvEmotes = settings.allowUnlistedSevenTvEmotes,
                 sevenTVLiveEmoteUpdates = settings.sevenTVLiveEmoteUpdates,
-                sevenTVLiveEmoteUpdatesBehavior = settings.sevenTVLiveEmoteUpdatesBehavior,
                 onInteraction = onInteraction,
+                onNavToBattery = onNavToBattery,
             )
             HorizontalDivider(thickness = Dp.Hairline)
             TinyCategory(
@@ -185,6 +205,8 @@ private fun ChatSettingsScreen(
             HorizontalDivider(thickness = Dp.Hairline)
             ChannelDataCategory(
                 showChatModes = settings.showChatModes,
+                alwaysShowPinnedMessage = settings.alwaysShowPinnedMessage,
+                showStreamTitleInLiveMessage = settings.showStreamTitleInLiveMessage,
                 onInteraction = onInteraction,
             )
             HorizontalDivider(thickness = Dp.Hairline)
@@ -201,53 +223,62 @@ private fun ChatSettingsScreen(
 }
 
 @Composable
-private fun GeneralCategory(
-    suggestions: Boolean,
-    preferEmoteSuggestions: Boolean,
-    supibotSuggestions: Boolean,
-    animateGifs: Boolean,
-    scrollbackLength: Int,
-    showUsernames: Boolean,
-    userLongClickBehavior: UserLongClickBehavior,
-    showTimedOutMessages: Boolean,
-    showTimestamps: Boolean,
-    timestampFormat: String,
-    visibleBadges: ImmutableList<VisibleBadges>,
-    visibleEmotes: ImmutableList<VisibleThirdPartyEmotes>,
+private fun SuggestionsCategory(
+    suggestionTypes: ImmutableList<SuggestionType>,
+    suggestionMode: SuggestionMode,
     onNavToCommands: () -> Unit,
-    onNavToUserDisplays: () -> Unit,
     onInteraction: (ChatSettingsInteraction) -> Unit,
 ) {
-    PreferenceCategory(title = stringResource(R.string.preference_general_header)) {
-        SwitchPreferenceItem(
+    PreferenceCategory(title = stringResource(R.string.preference_suggestions_header)) {
+        val suggestionEntries = listOf(
+            stringResource(R.string.preference_suggestions_emotes),
+            stringResource(R.string.preference_suggestions_users),
+            stringResource(R.string.preference_suggestions_commands),
+            stringResource(R.string.preference_suggestions_supibot),
+        ).toImmutableList()
+        val suggestionDescriptions = listOf(
+            stringResource(R.string.preference_suggestions_emotes_desc),
+            stringResource(R.string.preference_suggestions_users_desc),
+            stringResource(R.string.preference_suggestions_commands_desc),
+            stringResource(R.string.preference_suggestions_supibot_desc),
+        ).toImmutableList()
+        PreferenceMultiListDialog(
             title = stringResource(R.string.preference_suggestions_title),
             summary = stringResource(R.string.preference_suggestions_summary),
-            isChecked = suggestions,
-            onClick = { onInteraction(ChatSettingsInteraction.Suggestions(it)) },
+            values = remember { SuggestionType.entries.toImmutableList() },
+            initialSelected = suggestionTypes,
+            entries = suggestionEntries,
+            descriptions = suggestionDescriptions,
+            onChange = { onInteraction(ChatSettingsInteraction.SuggestionTypes(it)) },
         )
-        SwitchPreferenceItem(
-            title = stringResource(R.string.preference_prefer_emote_suggestions_title),
-            summary = stringResource(R.string.preference_prefer_emote_suggestions_summary),
-            isChecked = preferEmoteSuggestions,
-            onClick = { onInteraction(ChatSettingsInteraction.PreferEmoteSuggestions(it)) },
-        )
-        SwitchPreferenceItem(
-            title = stringResource(R.string.preference_supibot_suggestions_title),
-            isChecked = supibotSuggestions,
-            onClick = { onInteraction(ChatSettingsInteraction.SupibotSuggestions(it)) },
+        val modeAutomatic = stringResource(R.string.preference_suggestion_mode_automatic)
+        val modePrefixOnly = stringResource(R.string.preference_suggestion_mode_prefix_only)
+        val modeEntries = remember { listOf(modeAutomatic, modePrefixOnly).toImmutableList() }
+        PreferenceListDialog(
+            title = stringResource(R.string.preference_suggestion_mode_title),
+            summary = modeEntries[suggestionMode.ordinal],
+            values = SuggestionMode.entries.toImmutableList(),
+            entries = modeEntries,
+            selected = suggestionMode,
+            onChange = { onInteraction(ChatSettingsInteraction.SuggestionModeChange(it)) },
         )
         PreferenceItem(
             title = stringResource(R.string.commands_title),
             onClick = onNavToCommands,
             trailingIcon = Icons.AutoMirrored.Filled.ArrowForward,
         )
+    }
+}
 
-        SwitchPreferenceItem(
-            title = stringResource(R.string.preference_animate_gifs_title),
-            isChecked = animateGifs,
-            onClick = { onInteraction(ChatSettingsInteraction.AnimateGifs(it)) },
-        )
-
+@Composable
+private fun MessagesCategory(
+    scrollbackLength: Int,
+    showTimedOutMessages: Boolean,
+    showTimestamps: Boolean,
+    timestampFormat: String,
+    onInteraction: (ChatSettingsInteraction) -> Unit,
+) {
+    PreferenceCategory(title = stringResource(R.string.preference_messages_header)) {
         var sliderValue by remember(scrollbackLength) { mutableFloatStateOf(scrollbackLength.toFloat()) }
         SliderPreferenceItem(
             title = stringResource(R.string.preference_scrollback_length_title),
@@ -255,36 +286,10 @@ private fun GeneralCategory(
             range = 50f..1000f,
             steps = 18,
             onDrag = { sliderValue = it },
-            onDragFinished = { onInteraction(ChatSettingsInteraction.ScrollbackLength(sliderValue.roundToInt())) },
+            onDragFinish = { onInteraction(ChatSettingsInteraction.ScrollbackLength(sliderValue.roundToInt())) },
             displayValue = false,
             summary = sliderValue.roundToInt().toString(),
         )
-
-        SwitchPreferenceItem(
-            title = stringResource(R.string.preference_show_username_title),
-            isChecked = showUsernames,
-            onClick = { onInteraction(ChatSettingsInteraction.ShowUsernames(it)) },
-        )
-
-        val longClickSummaryOn = stringResource(R.string.preference_user_long_click_summary_on)
-        val longClickSummaryOff = stringResource(R.string.preference_user_long_click_summary_off)
-        val longClickEntries = remember { listOf(longClickSummaryOn, longClickSummaryOff).toImmutableList() }
-        PreferenceListDialog(
-            title = stringResource(R.string.preference_user_long_click_title),
-            summary = longClickEntries[userLongClickBehavior.ordinal],
-            values = UserLongClickBehavior.entries.toImmutableList(),
-            entries = longClickEntries,
-            selected = userLongClickBehavior,
-            onChanged = { onInteraction(ChatSettingsInteraction.UserLongClick(it)) },
-        )
-
-        PreferenceItem(
-            title = stringResource(R.string.custom_user_display_title),
-            summary = stringResource(R.string.custom_user_display_summary),
-            onClick = onNavToUserDisplays,
-            trailingIcon = Icons.AutoMirrored.Filled.ArrowForward,
-        )
-
         SwitchPreferenceItem(
             title = stringResource(R.string.preference_show_timed_out_messages_title),
             isChecked = showTimedOutMessages,
@@ -302,26 +307,81 @@ private fun GeneralCategory(
             values = timestampFormats,
             entries = timestampFormats,
             selected = timestampFormat,
-            onChanged = { onInteraction(ChatSettingsInteraction.TimestampFormat(it)) },
+            onChange = { onInteraction(ChatSettingsInteraction.TimestampFormat(it)) },
         )
+    }
+}
 
-        val entries = stringArrayResource(R.array.badges_entries)
-            .plus(stringResource(R.string.shared_chat))
-            .toImmutableList()
+@Composable
+private fun UsersCategory(
+    showUsernames: Boolean,
+    userLongClickBehavior: UserLongClickBehavior,
+    colorizeNicknames: Boolean,
+    onNavToUserDisplays: () -> Unit,
+    onInteraction: (ChatSettingsInteraction) -> Unit,
+) {
+    PreferenceCategory(title = stringResource(R.string.preference_users_header)) {
+        SwitchPreferenceItem(
+            title = stringResource(R.string.preference_show_username_title),
+            isChecked = showUsernames,
+            onClick = { onInteraction(ChatSettingsInteraction.ShowUsernames(it)) },
+        )
+        val longClickSummaryOn = stringResource(R.string.preference_user_long_click_summary_on)
+        val longClickSummaryOff = stringResource(R.string.preference_user_long_click_summary_off)
+        val longClickEntries = remember { listOf(longClickSummaryOn, longClickSummaryOff).toImmutableList() }
+        PreferenceListDialog(
+            title = stringResource(R.string.preference_user_long_click_title),
+            summary = longClickEntries[userLongClickBehavior.ordinal],
+            values = UserLongClickBehavior.entries.toImmutableList(),
+            entries = longClickEntries,
+            selected = userLongClickBehavior,
+            onChange = { onInteraction(ChatSettingsInteraction.UserLongClick(it)) },
+        )
+        SwitchPreferenceItem(
+            title = stringResource(R.string.preference_colorize_nicknames_title),
+            summary = stringResource(R.string.preference_colorize_nicknames_summary),
+            isChecked = colorizeNicknames,
+            onClick = { onInteraction(ChatSettingsInteraction.ColorizeNicknames(it)) },
+        )
+        PreferenceItem(
+            title = stringResource(R.string.custom_user_display_title),
+            summary = stringResource(R.string.custom_user_display_summary),
+            onClick = onNavToUserDisplays,
+            trailingIcon = Icons.AutoMirrored.Filled.ArrowForward,
+        )
+    }
+}
 
+@Composable
+private fun EmotesAndBadgesCategory(
+    animateGifs: Boolean,
+    visibleBadges: ImmutableList<VisibleBadges>,
+    visibleEmotes: ImmutableList<VisibleThirdPartyEmotes>,
+    onInteraction: (ChatSettingsInteraction) -> Unit,
+) {
+    PreferenceCategory(title = stringResource(R.string.preference_emotes_badges_header)) {
+        SwitchPreferenceItem(
+            title = stringResource(R.string.preference_animate_gifs_title),
+            isChecked = animateGifs,
+            onClick = { onInteraction(ChatSettingsInteraction.AnimateGifs(it)) },
+        )
+        val badgeEntries =
+            stringArrayResource(R.array.badges_entries)
+                .plus(stringResource(R.string.shared_chat))
+                .toImmutableList()
         PreferenceMultiListDialog(
             title = stringResource(R.string.preference_visible_badges_title),
             initialSelected = visibleBadges,
             values = VisibleBadges.entries.toImmutableList(),
-            entries = entries,
-            onChanged = { onInteraction(ChatSettingsInteraction.Badges(it)) },
+            entries = badgeEntries,
+            onChange = { onInteraction(ChatSettingsInteraction.Badges(it)) },
         )
         PreferenceMultiListDialog(
             title = stringResource(R.string.preference_visible_emotes_title),
             initialSelected = visibleEmotes,
             values = VisibleThirdPartyEmotes.entries.toImmutableList(),
             entries = stringArrayResource(R.array.emotes_entries).toImmutableList(),
-            onChanged = { onInteraction(ChatSettingsInteraction.Emotes(it)) },
+            onChange = { onInteraction(ChatSettingsInteraction.Emotes(it)) },
         )
     }
 }
@@ -365,9 +425,9 @@ private fun EncryptionCategory(
             values = ChatEncryption.Encoding.entries.toImmutableList(),
             entries = ChatEncryption.Encoding.entries.map { it.name }.toImmutableList(),
             selected = encryptionEncoding,
-            onChanged = { onInteraction(ChatSettingsInteraction.EncryptionEncoding(it)) },
+            onChange = { onInteraction(ChatSettingsInteraction.EncryptionEncoding(it)) },
         )
-        ExpandablePreferenceItem(title = stringResource(R.string.preference_encryption_password)) {
+        ExpandablePreferenceItem (title = stringResource(R.string.preference_encryption_password)) {
             EncryptionPasswordBottomSheet(
                 initialPassword = encryptionPassword,
                 onInteraction = {
@@ -384,8 +444,8 @@ private fun SevenTVCategory(
     enabled: Boolean,
     allowUnlistedSevenTvEmotes: Boolean,
     sevenTVLiveEmoteUpdates: Boolean,
-    sevenTVLiveEmoteUpdatesBehavior: LiveUpdatesBackgroundBehavior,
     onInteraction: (ChatSettingsInteraction) -> Unit,
+    onNavToBattery: () -> Unit,
 ) {
     PreferenceCategory(title = stringResource(R.string.preference_7tv_category_title)) {
         SwitchPreferenceItem(
@@ -401,20 +461,9 @@ private fun SevenTVCategory(
             isChecked = sevenTVLiveEmoteUpdates,
             onClick = { onInteraction(ChatSettingsInteraction.LiveEmoteUpdates(it)) },
         )
-        val liveUpdateEntries = stringArrayResource(R.array.event_api_timeout_entries).toImmutableList()
-        val summary = when (sevenTVLiveEmoteUpdatesBehavior) {
-            LiveUpdatesBackgroundBehavior.Never -> stringResource(R.string.preference_7tv_live_updates_timeout_summary_never_active)
-            LiveUpdatesBackgroundBehavior.Always -> stringResource(R.string.preference_7tv_live_updates_timeout_summary_always_active)
-            else -> stringResource(R.string.preference_7tv_live_updates_timeout_summary_timeout, liveUpdateEntries[sevenTVLiveEmoteUpdatesBehavior.ordinal])
-        }
-        PreferenceListDialog(
-            isEnabled = enabled && sevenTVLiveEmoteUpdates,
-            title = stringResource(R.string.preference_7tv_live_updates_timeout_title),
-            summary = summary,
-            values = LiveUpdatesBackgroundBehavior.entries.toImmutableList(),
-            entries = liveUpdateEntries,
-            selected = sevenTVLiveEmoteUpdatesBehavior,
-            onChanged = { onInteraction(ChatSettingsInteraction.LiveEmoteUpdatesBehavior(it)) },
+        PreferenceItem(
+            title = stringResource(R.string.preference_battery_pause_7tv_title),
+            onClick = onNavToBattery,
         )
     }
 }
@@ -450,6 +499,8 @@ private fun MessageHistoryCategory(
 @Composable
 private fun ChannelDataCategory(
     showChatModes: Boolean,
+    alwaysShowPinnedMessage: Boolean,
+    showStreamTitleInLiveMessage: Boolean,
     onInteraction: (ChatSettingsInteraction) -> Unit,
 ) {
     PreferenceCategory(title = stringResource(R.string.preference_channel_data_header)) {
@@ -458,6 +509,17 @@ private fun ChannelDataCategory(
             summary = stringResource(R.string.preference_roomstate_summary),
             isChecked = showChatModes,
             onClick = { onInteraction(ChatSettingsInteraction.ChatModes(it)) },
+        )
+        SwitchPreferenceItem(
+            title = stringResource(R.string.preference_always_show_pinned_message_title),
+            summary = stringResource(R.string.preference_always_show_pinned_message_summary),
+            isChecked = alwaysShowPinnedMessage,
+            onClick = { onInteraction(ChatSettingsInteraction.AlwaysShowPinnedMessage(it)) },
+        )
+        SwitchPreferenceItem(
+            title = stringResource(R.string.preference_show_stream_title_in_live_message_title),
+            isChecked = showStreamTitleInLiveMessage,
+            onClick = { onInteraction(ChatSettingsInteraction.ShowStreamTitleInLiveMessage(it)) },
         )
     }
 }
@@ -476,19 +538,19 @@ private fun EncryptionPasswordBottomSheet(
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                .padding(start = Dp.Hairline, end = Dp.Hairline, bottom = Dp.Hairline),
         )
         TextButton(
             onClick = { password = "CHANGE_THIS" },
             content = { Text(stringResource(R.string.reset)) },
             modifier = Modifier
                 .align(Alignment.End)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = Dp.Hairline),
         )
         OutlinedTextField(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = Dp.Hairline),
             value = password,
             onValueChange = { password = it },
             label = { Text(stringResource(R.string.preference_encryption_password)) },
@@ -499,6 +561,6 @@ private fun EncryptionPasswordBottomSheet(
                 keyboardType = KeyboardType.Uri,
             ),
         )
-        Spacer(Modifier.height(64.dp))
+        Spacer(Modifier.height(Dp.Hairline))
     }
 }

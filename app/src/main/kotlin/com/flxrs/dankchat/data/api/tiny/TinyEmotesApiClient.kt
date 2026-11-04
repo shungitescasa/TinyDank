@@ -13,15 +13,17 @@ import org.koin.core.annotation.Single
 @Single
 class TinyEmotesApiClient(private val tinyApi: TinyEmotesApi, private val json: Json) {
 
-    suspend fun getTinyUser(instanceUrl: String, channelId: UserId): Result<TinyResponseDto<TinyUserDto>?> = runCatching {
+    suspend fun getTinyUser(instanceUrl: String, channelId: UserId): Result<TinyUserDto?> = runCatching {
         tinyApi.getUser(instanceUrl, channelId)
             .throwApiErrorOnFailure(json)
             .body<TinyResponseDto<TinyUserDto>>()
+            .data
     }.recoverNotFoundWith(null)
 
-    suspend fun getTinyGlobalEmoteset(instanceUrl: String): Result<TinyResponseDto<TinyEmotesetDto>> = runCatching {
+    suspend fun getTinyGlobalEmoteset(instanceUrl: String): Result<TinyEmotesetDto> = runCatching {
         tinyApi.getGlobalEmoteset(instanceUrl)
             .throwApiErrorOnFailure(json)
-            .body()
+            .body<TinyResponseDto<TinyEmotesetDto>>()
+            .data
     }
 }
