@@ -396,6 +396,7 @@ private fun MessageHighlightItem(
             MessageHighlightItem.Type.WatchStreak -> R.string.highlights_ignores_entry_watch_streaks
             MessageHighlightItem.Type.FirstMessage -> R.string.highlights_ignores_entry_first_messages
             MessageHighlightItem.Type.ElevatedMessage -> R.string.highlights_ignores_entry_elevated_messages
+            MessageHighlightItem.Type.Encrypted -> R.string.highlights_entry_encrypted_messages
             MessageHighlightItem.Type.ChannelPointRedemption -> R.string.highlights_ignores_entry_redemptions
             MessageHighlightItem.Type.Reply -> R.string.highlights_ignores_entry_replies
             MessageHighlightItem.Type.Custom -> R.string.highlights_ignores_entry_custom
@@ -488,6 +489,7 @@ private fun MessageHighlightItem(
                 MessageHighlightItem.Type.WatchStreak -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.WatchStreak, isDark)
                 MessageHighlightItem.Type.ChannelPointRedemption -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.ChannelPointRedemption, isDark)
                 MessageHighlightItem.Type.ElevatedMessage -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.ElevatedMessage, isDark)
+                MessageHighlightItem.Type.Encrypted -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.Encrypted, isDark)
                 MessageHighlightItem.Type.FirstMessage -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.FirstMessage, isDark)
                 MessageHighlightItem.Type.Username -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.Username, isDark)
                 MessageHighlightItem.Type.Reply, MessageHighlightItem.Type.Custom -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.Reply, isDark)

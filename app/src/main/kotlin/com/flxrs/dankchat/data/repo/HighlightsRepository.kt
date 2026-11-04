@@ -356,6 +356,11 @@ class HighlightsRepository(
                         }
                     }
                 }
+
+                val encryptedHighlight = messageHighlights.ofType(MessageHighlightEntityType.Encrypted)
+                if (encrypted && encryptedHighlight != null) {
+                    add(Highlight(HighlightType.Encrypted, encryptedHighlight.customColor))
+                }
             }
 
         return copy(highlights = highlights)
@@ -426,6 +431,7 @@ class HighlightsRepository(
                 MessageHighlightEntity(id = 0, enabled = true, type = MessageHighlightEntityType.ChannelPointRedemption, pattern = "", createNotification = false),
                 MessageHighlightEntity(id = 0, enabled = true, type = MessageHighlightEntityType.FirstMessage, pattern = "", createNotification = false),
                 MessageHighlightEntity(id = 0, enabled = true, type = MessageHighlightEntityType.ElevatedMessage, pattern = "", createNotification = false),
+                MessageHighlightEntity(id = 0, enabled = true, type = MessageHighlightEntityType.Encrypted, pattern = "", createNotification = false),
                 MessageHighlightEntity(id = 0, enabled = true, type = MessageHighlightEntityType.Reply, pattern = ""),
             )
         private val DEFAULT_BADGE_HIGHLIGHTS =

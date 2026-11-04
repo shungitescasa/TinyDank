@@ -30,6 +30,7 @@ data class MessageHighlightItem(
         ChannelPointRedemption,
         FirstMessage,
         ElevatedMessage,
+        Encrypted,
         Reply,
         Custom,
     }
@@ -102,6 +103,7 @@ fun MessageHighlightItem.Type.toEntityType(): MessageHighlightEntityType = when 
     MessageHighlightItem.Type.ChannelPointRedemption -> MessageHighlightEntityType.ChannelPointRedemption
     MessageHighlightItem.Type.FirstMessage -> MessageHighlightEntityType.FirstMessage
     MessageHighlightItem.Type.ElevatedMessage -> MessageHighlightEntityType.ElevatedMessage
+    MessageHighlightItem.Type.Encrypted -> MessageHighlightEntityType.Encrypted
     MessageHighlightItem.Type.Reply -> MessageHighlightEntityType.Reply
     MessageHighlightItem.Type.Custom -> MessageHighlightEntityType.Custom
 }
@@ -114,6 +116,7 @@ fun MessageHighlightEntityType.toItemType(): MessageHighlightItem.Type = when (t
     MessageHighlightEntityType.ChannelPointRedemption -> MessageHighlightItem.Type.ChannelPointRedemption
     MessageHighlightEntityType.FirstMessage -> MessageHighlightItem.Type.FirstMessage
     MessageHighlightEntityType.ElevatedMessage -> MessageHighlightItem.Type.ElevatedMessage
+    MessageHighlightEntityType.Encrypted -> MessageHighlightItem.Type.Encrypted
     MessageHighlightEntityType.Reply -> MessageHighlightItem.Type.Reply
     MessageHighlightEntityType.Custom -> MessageHighlightItem.Type.Custom
 }

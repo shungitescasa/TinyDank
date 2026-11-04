@@ -899,6 +899,13 @@ class ChatMessageMapper(
             )
         }
 
+        HighlightType.Encrypted -> {
+            BackgroundColors(
+                light = COLOR_ENCRYPTED_HIGHLIGHT_LIGHT,
+                dark = COLOR_ENCRYPTED_HIGHLIGHT_DARK,
+            )
+        }
+
         HighlightType.Username,
         HighlightType.Custom,
         HighlightType.Reply,
@@ -947,6 +954,7 @@ class ChatMessageMapper(
         private val COLOR_FIRST_MESSAGE_HIGHLIGHT_LIGHT = Color(0xCC558B2F)
         private val COLOR_ELEVATED_MESSAGE_HIGHLIGHT_LIGHT = Color(0xCCB08D2A)
         private val COLOR_WATCH_STREAK_HIGHLIGHT_LIGHT = Color(0xCC2979B7)
+        private val COLOR_ENCRYPTED_HIGHLIGHT_LIGHT = Color(0x7F9CFFE7)
         private val COLOR_ANNOUNCEMENT_BLUE_LIGHT = Color(0xCC3363C0)
         private val COLOR_ANNOUNCEMENT_GREEN_LIGHT = Color(0xCC2E7D32)
         private val COLOR_ANNOUNCEMENT_ORANGE_LIGHT = Color(0xCCBF6516)
@@ -959,6 +967,7 @@ class ChatMessageMapper(
         private val COLOR_FIRST_MESSAGE_HIGHLIGHT_DARK = Color(0xCC3A6600)
         private val COLOR_ELEVATED_MESSAGE_HIGHLIGHT_DARK = Color(0xCC6B5800)
         private val COLOR_WATCH_STREAK_HIGHLIGHT_DARK = Color(0xCC1A5C8A)
+        private val COLOR_ENCRYPTED_HIGHLIGHT_DARK = Color(0x42534d7f)
         private val COLOR_ANNOUNCEMENT_BLUE_DARK = Color(0xCC24488F)
         private val COLOR_ANNOUNCEMENT_GREEN_DARK = Color(0xCC1B5E20)
         private val COLOR_ANNOUNCEMENT_ORANGE_DARK = Color(0xCC8F4A0E)
@@ -974,6 +983,7 @@ class ChatMessageMapper(
             HighlightType.ChannelPointRedemption -> if (isDark) 0xCC00606B else 0xCC458B93
             HighlightType.FirstMessage -> if (isDark) 0xCC3A6600 else 0xCC558B2F
             HighlightType.ElevatedMessage -> if (isDark) 0xCC6B5800 else 0xCCB08D2A
+            HighlightType.Encrypted -> if (isDark) 0xCC1B5E48 else 0xCC2E8B6A
         }.toInt()
 
         private val DEFAULT_HIGHLIGHT_COLOR_INTS =
@@ -991,6 +1001,8 @@ class ChatMessageMapper(
                 0xCC6B5800.toInt(), // elevated dark
                 0xCC2979B7.toInt(), // watch streak light
                 0xCC1A5C8A.toInt(), // watch streak dark
+                0xCC2E8B6A.toInt(), // encrypted light
+                0xCC1B5E48.toInt(), // encrypted dark
                 // Legacy defaults (fully opaque)
                 0xFF7E57C2.toInt(), // sub light
                 0xFF6A45A0.toInt(), // sub dark

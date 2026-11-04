@@ -7,6 +7,7 @@ import com.flxrs.dankchat.data.database.entity.MessageHighlightEntityType
 import com.flxrs.dankchat.data.repo.HighlightsRepository
 import com.flxrs.dankchat.di.DispatchersProvider
 import com.flxrs.dankchat.preferences.DankChatPreferenceStore
+import com.flxrs.dankchat.preferences.chat.ChatSettingsDataStore
 import com.flxrs.dankchat.preferences.notifications.NotificationsSettingsDataStore
 import com.flxrs.dankchat.utils.extensions.replaceAll
 import kotlinx.coroutines.channels.Channel
@@ -23,6 +24,7 @@ class HighlightsViewModel(
     private val highlightsRepository: HighlightsRepository,
     private val preferenceStore: DankChatPreferenceStore,
     private val notificationsSettingsDataStore: NotificationsSettingsDataStore,
+    private val chatSettingsDataStore: ChatSettingsDataStore,
     private val dispatchersProvider: DispatchersProvider,
 ) : ViewModel() {
     private val _currentTab = MutableStateFlow(HighlightsTab.Messages)
@@ -43,7 +45,12 @@ class HighlightsViewModel(
     fun fetchHighlights() = viewModelScope.launch {
         val loggedIn = preferenceStore.isLoggedIn
         val notificationsEnabled = notificationsSettingsDataStore.settings.first().showNotifications
-        val messageHighlightItems = highlightsRepository.messageHighlights.value.map { it.toItem(loggedIn, notificationsEnabled) }
+        val encryptionEnabled = chatSettingsDataStore.current().enableMessageEncryption
+
+        val messageHighlightItems =
+            highlightsRepository.messageHighlights.value
+                .filter { encryptionEnabled || it.type != MessageHighlightEntityType.Encrypted }
+                .map { it.toItem(loggedIn, notificationsEnabled) }
         val userHighlightItems = highlightsRepository.userHighlights.value.map { it.toItem(notificationsEnabled) }
         val badgeHighlightItems = highlightsRepository.badgeHighlights.value.map { it.toItem(notificationsEnabled) }
         val blacklistedUserItems = highlightsRepository.blacklistedUsers.value.map { it.toItem() }
