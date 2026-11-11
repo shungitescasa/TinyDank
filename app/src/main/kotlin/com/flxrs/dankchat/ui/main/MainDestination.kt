@@ -33,6 +33,9 @@ object TinyInstancesSettings
 object UserDisplaySettings
 
 @Serializable
+object DankChatAccountSettings
+
+@Serializable
 object StreamsSettings
 
 @Serializable

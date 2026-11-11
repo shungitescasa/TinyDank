@@ -13,11 +13,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-      - name: set up JDK 17
+      - name: set up JDK 21
         uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
-          java-version: '17.0.20+101'
+          java-version: '25.0.5+8.0.LTS'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -37,7 +37,7 @@ jobs:
         uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
-          java-version: '21.0.12+101.0.LTS'
+          java-version: '25.0.5+8.0.LTS'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -59,11 +59,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-      - name: set up JDK 17
+      - name: set up JDK 21
         uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
-          java-version: '17.0.20+101'
+          java-version: '25.0.5+8.0.LTS'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -101,14 +101,18 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     if: (github.event_name == 'push' && github.ref == 'refs/heads/tinydankchat')
+    # Overlapping runs race on the rolling release and leave stale releases behind
+    concurrency:
+      group: release
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v7
-      - name: set up JDK 17
+      - name: set up JDK 21
         uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
-          java-version: '17.0.20+101'
+          java-version: '25.0.5+8.0.LTS'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -163,20 +167,18 @@ jobs:
             git push origin "$TAG"
           fi
 
-          release_id=$(gh api "repos/$REPO/releases" \
-            --jq '.[] | select(.name | startswith("Release")) | .id' | head -1)
-
           notes="**Version:** \`v${VERSION}\`
           **Commit:** [\`${SHORT_SHA}\`](https://github.com/${REPO}/commit/${GITHUB_SHA})"
 
           # GitHub displays the original publish date, so the release is recreated on every build
-          if [ -n "$release_id" ]; then
-            old_tag=$(gh api "repos/$REPO/releases/$release_id" --jq '.tag_name')
+          gh api --paginate "repos/$REPO/releases" \
+            --jq '.[] | select(.name | startswith("Release")) | "\(.id) \(.tag_name)"' |
+          while read -r release_id old_tag; do
             gh api -X DELETE "repos/$REPO/releases/$release_id"
             if [ "$old_tag" != "$TAG" ]; then
               git push origin ":refs/tags/$old_tag" || true
             fi
-          fi
+          done
 
           gh release create "$TAG" "$apk" \
             --repo "$REPO" \

@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.koin.core.annotation.KoinViewModel
+import java.net.URL
 
 @KoinViewModel
 class DialogStateViewModel(
@@ -86,10 +87,10 @@ class DialogStateViewModel(
     val uploadHost: String
         get() =
             runCatching {
-                java.net.URL(toolsSettingsDataStore.current().uploaderConfig.uploadUrl).host
+                URL(toolsSettingsDataStore.current().uploaderConfig.uploadUrl).host
             }.getOrDefault("")
 
-    fun setPendingUploadAction(action: (() -> Unit)?) {
+    fun setPendingUploadAction(action: UploadAction?) {
         update { copy(pendingUploadAction = action) }
     }
 

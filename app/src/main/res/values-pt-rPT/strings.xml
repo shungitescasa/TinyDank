@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <string name="app_name">TinyDankChat</string>
-    <string name="app_name_dank">TinyDankChat (Dank)</string>
+    <string name="app_name">TinyDank</string>
+    <string name="app_name_dank">TinyDank (Dank)</string>
     <string name="send_hint">Envia uma mensagem</string>
-    <string name="login">Inicio de sessão</string>
+    <string name="login">Início de sessão</string>
     <string name="reload_emotes">Recarregar emotes</string>
     <string name="reconnect">Reconectar</string>
     <string name="clear_chat">Limpar o chat</string>
@@ -16,6 +16,7 @@
     <string name="error_dialog_copy">Copiar</string>
     <string name="error_dialog_title">Exceção capturada: %1$s</string>
     <string name="add_channel">Adicionar canal</string>
+    <string name="add_channels">Adicionar canais</string>
     <string name="manage_channels">Gerenciar canais</string>
     <string name="report_channel">Reportar canal</string>
     <string name="block_channel">Bloquear canal</string>
@@ -25,6 +26,9 @@
     <string name="channel_blocked_message">Canal bloqueado</string>
     <string name="no_channels_added">Sem canais adicionados</string>
     <string name="no_channels_added_body">Adicione um canal para começar a conversar</string>
+    <string name="enable_channel_notifications">Ativar notificações em segundo plano para %1$s</string>
+    <string name="disable_channel_notifications">Desativar notificações em segundo plano para %1$s</string>
+    <string name="channel_background_notifications">Notificações em segundo plano</string>
     <string name="confirm_logout_title">Confirmar encerramento de sessão</string>
     <string name="confirm_logout_message">Tens a certeza de que desejas terminar a sessão?</string>
     <string name="confirm_logout_question">Terminar sessão?</string>
@@ -53,9 +57,6 @@
     <string name="hint_not_logged_int">Sem sessão iniciada</string>
     <string name="hint_replying">Responde</string>
     <string name="hint_announcing">Enviar anúncio</string>
-    <string name="notification_new_mentions">Tens novas menções</string>
-    <string name="notification_mention">%1$s mencionou-te em #%2$s</string>
-    <string name="notification_notify_mention">Foste mencionado em #%1$s</string>
     <string name="snackbar_login">A iniciar sessão como %1$s</string>
     <string name="snackbar_login_failed">Falha ao iniciar sessão</string>
     <string name="snackbar_image_uploaded">Copiado: %1$s</string>
@@ -90,28 +91,33 @@
     <string name="highlight_header_reward_no_cost">Resgatado %1$s</string>
     <plurals name="duration_seconds">
         <item quantity="one">%1$d segundo</item>
+        <item quantity="many">%1$d de segundos</item>
         <item quantity="other">%1$d segundos</item>
     </plurals>
     <plurals name="duration_minutes">
         <item quantity="one">%1$d minuto</item>
+        <item quantity="many">%1$d de minutos</item>
         <item quantity="other">%1$d minutos</item>
     </plurals>
     <plurals name="duration_hours">
         <item quantity="one">%1$d hora</item>
+        <item quantity="many">%1$d de horas</item>
         <item quantity="other">%1$d horas</item>
     </plurals>
     <plurals name="duration_days">
         <item quantity="one">%1$d dia</item>
+        <item quantity="many">%1$d de dias</item>
         <item quantity="other">%1$d dias</item>
     </plurals>
     <plurals name="duration_weeks">
         <item quantity="one">%1$d semana</item>
+        <item quantity="many">%1$d de semanas</item>
         <item quantity="other">%1$d semanas</item>
     </plurals>
     <string name="duration_join_2">%1$s %2$s</string>
-    <string name="duration_join_3">%1$s %2$s %3$s</string>
     <string name="snackbar_paste">Colar</string>
-    <string name="add_channel_hint">Nome do canal</string>
+    <string name="add_channels_hint">Nomes dos canais</string>
+    <string name="add_channels_empty">Introduz pelo menos um nome de canal</string>
     <string name="add_channel_already_added">O canal já foi adicionado</string>
     <string name="emote_menu_tab_recent">Recente</string>
     <string name="backspace">Apagar</string>
@@ -121,6 +127,7 @@
     <string name="system_message_connected">Conectado</string>
     <string name="system_message_reconnected">Reconectado</string>
     <string name="system_message_channel_non_existent">Este canal não existe.</string>
+    <string name="system_message_channel_join_failed">Falha ao entrar neste canal</string>
     <string name="system_message_disconnected">Desconectado</string>
     <string name="system_message_history_unavailable_detailed">Serviço de histórico de mensagens indisponível (Erro %1$s)</string>
     <string name="system_message_history_unavailable">Serviço de histórico de mensagens indisponível</string>
@@ -172,6 +179,7 @@
     <string name="automod_reason_category" comment="aggressive (level 2)">%1$s (nível %2$d)</string>
     <plurals name="automod_reason_blocked_terms">
         <item quantity="one">corresponde a %1$d termo bloqueado %2$s</item>
+        <item quantity="many">corresponde a %1$d de termos bloqueados %2$s</item>
         <item quantity="other">corresponde a %1$d termos bloqueados %2$s</item>
     </plurals>
     <string name="automod_error_already_processed" comment="Failed to allow AutoMod message - message has already been processed.">Falha ao %1$s mensagem do AutoMod - a mensagem já foi processada.</string>
@@ -248,10 +256,12 @@
     <!-- Parenthetical count (appended after complete sentences, safe for all languages) -->
     <plurals name="mod_count_suffix" comment=" (2 times)">
         <item quantity="one">\u0020(%1$d vez)</item>
+        <item quantity="many">\u0020(%1$d de vezes)</item>
         <item quantity="other">\u0020(%1$d vezes)</item>
     </plurals>
     <string name="timed_out_message">&lt; Mensagem apagada &gt;</string>
     <string name="multi_entry_header_regex">Expressão regular</string>
+    <string name="multi_entry_invalid_regex">Expressão regular inválida</string>
     <string name="multi_entry_add_entry">Adicionar uma entrada</string>
     <string name="login_expired">Sessão expirada! Tenta fazer login novamente.</string>
     <string name="message_history_disclaimer_title">Aviso de histórico de mensagem</string>
@@ -263,6 +273,7 @@
     <string name="replies_title">Responde à thread</string>
     <string name="whispers">Sussurros</string>
     <string name="notification_whisper_mention">%1$s enviou-te um sussurro</string>
+    <string name="notification_whisper_conversation_title">Sussurro de @%1$s</string>
     <string name="mentions">Menções</string>
     <string name="confirm_channel_removal_title">Confirmar exclusão de canal</string>
     <string name="confirm_channel_removal_message">Tens a certeza que desejas remover este canal?</string>
@@ -277,6 +288,7 @@
     <string name="user_popup_unblock">Desbloquear</string>
     <string name="user_popup_mention">Mencionar utilizador</string>
     <string name="user_popup_whisper">Envia um sussurro ao utilizador</string>
+    <string name="user_popup_ignore_highlights">Ignorar destaques</string>
     <string name="user_popup_created">Criado %1$s</string>
     <string name="user_popup_following_since">A seguir desde %1$s</string>
     <string name="user_popup_not_following">Não estás a seguir</string>
@@ -289,6 +301,7 @@
     <string name="restart">Reinicia</string>
     <string name="uploader_reset">Redefinir para configurações originais</string>
     <string name="uploader_url">URL de carregamento</string>
+    <string name="uploader_url_unresolved">Não foi possível encontrar este domínio</string>
     <string name="uploader_field">Campo de formulário</string>
     <string name="uploader_headers">Cabeçalhos</string>
     <string name="uploader_image_link">Padrão de link de mídia</string>
@@ -311,9 +324,11 @@
     <string name="menu_exit_fullscreen">Sair do ecrã inteiro</string>
     <string name="menu_hide_input">Ocultar entrada</string>
     <string name="menu_show_input">Mostrar entrada</string>
+    <string name="menu_enable_tts">Ativar TTS</string>
+    <string name="menu_disable_tts">Desativar TTS</string>
     <string name="preference_fullscreen_button_opacity_title">Opacidade dos botões em ecrã inteiro</string>
     <string name="preference_fullscreen_button_opacity_summary">Botões apresentados em ecrã inteiro ou quando a entrada está oculta: %d%%</string>
-    <string name="preference_fullscreen_button_opacity_hint">Opacidade (1-100)</string>
+    <string name="preference_fullscreen_button_opacity_hint">Opacidade (1–100)</string>
     <string name="preference_fullscreen_button_opacity_validation">Deve estar entre 1 e 100</string>
     <string name="preference_fullscreen_button_opacity_custom">Personalizado</string>
     <string name="preference_require_fullscreen_exit_confirmation_title">Confirmar saída do ecrã inteiro</string>
@@ -323,6 +338,7 @@
     <string name="menu_mod_actions">Moderação do canal</string>
     <plurals name="input_actions_max">
         <item quantity="one">Máximo de %1$d ação</item>
+        <item quantity="many">Máximo de %1$d de ações</item>
         <item quantity="other">Máximo de %1$d ações</item>
     </plurals>
     <string name="input_actions_none">Nenhuma ação visível</string>
@@ -333,6 +349,7 @@
     <string name="input_action_mod_actions">Moderação do canal</string>
     <string name="input_action_fullscreen">Ecrã inteiro</string>
     <string name="input_action_hide_input">Ocultar entrada</string>
+    <string name="input_action_tts">Texto para voz</string>
     <string name="input_action_debug">Depuração</string>
     <string name="input_action_configure">Configurar ações</string>
     <string name="input_action_hide_all">Ocultar todas as ações</string>
@@ -409,6 +426,7 @@
     <string name="tts_ignore_list_add_user">Adicionar um utilizador</string>
     <string name="tts_ignore_list_remove_user">Remover utilizador</string>
     <string name="tts_ignore_list_user_hint">Utilizador</string>
+    <string name="tts_start_failed">Falha ao iniciar o TTS</string>
     <string name="recent_upload_deletion_link">Link de exclusão:\n%1$s</string>
     <string name="recent_uploads_clear">Limpar carregamentos</string>
     <string name="host">Anfitrião</string>
@@ -435,6 +453,7 @@
     <string name="preference_roomstate_summary">Exibir informações sobre os modos atuais do chat, como o modo somente para subscritores</string>
     <string name="preference_always_show_pinned_message_title">Mostrar sempre a mensagem fixada</string>
     <string name="preference_always_show_pinned_message_summary">Desativa a recolha automática do banner da mensagem fixada</string>
+    <string name="preference_always_show_pinned_message_moderator_note">A Twitch pode mostrar as mensagens fixadas apenas aos moderadores</string>
     <string name="preference_show_stream_title_in_live_message_title">Mostrar o título da transmissão nas mensagens em direto</string>
     <string name="preference_compact_channel_info_title">Informação de canal compacta</string>
     <string name="preference_compact_channel_info_summary">Exibe os modos do chat e a informação da stream numa única linha</string>
@@ -447,6 +466,10 @@
     <string name="preference_general_header">Geral</string>
     <string name="preference_suggestions_header">Sugestões</string>
     <string name="preference_messages_header">Mensagens</string>
+    <string name="preference_message_tap_action_title">Ação ao tocar na mensagem</string>
+    <string name="preference_message_tap_action_do_nothing">Não fazer nada</string>
+    <string name="preference_message_tap_action_open_user_card">Abrir cartão do utilizador</string>
+    <string name="preference_message_tap_action_open_message_options">Abrir opções da mensagem</string>
     <string name="preference_users_header">Utilizadores</string>
     <string name="preference_emotes_badges_header">Emotes &amp; Insígnias</string>
     <string name="preference_suggestion_mode_title">Modo de sugestão</string>
@@ -499,7 +522,10 @@
     <string name="preference_display_group_title">Visualização</string>
     <string name="preference_components_group_title">Componentes</string>
     <string name="preference_show_timed_out_messages_title">Mostrar mensagens apagadas por suspensão temporária</string>
-    <string name="preference_animate_gifs_title">Gifs animados</string>
+    <string name="preference_show_whispers_inline_title">Mostrar sussurros no chat</string>
+    <string name="preference_show_whispers_inline_summary">Mostra os sussurros enviados e recebidos em todos os canais abertos</string>
+    <string name="preference_show_twitch_gifs_title">Mostrar GIFs da Twitch</string>
+    <string name="preference_animations_title">Animar emotes, insígnias e GIFs</string>
     <string name="preference_line_separator_title">Separar mensagens com linhas</string>
     <string name="preference_keep_screen_on_title">Manter o ecrã ligado</string>
     <string name="preference_font_size_title">Tamanho da fonte</string>
@@ -544,6 +570,8 @@
     <string name="preference_tts_message_ignore_emote_title">Ignorar emotes</string>
     <string name="preference_tts_message_ignore_command_message">Ignora mensagens que começam com um prefixo de comando (!, $, %, +, -, ~)</string>
     <string name="preference_tts_message_ignore_command_title">Ignorar comandos</string>
+    <string name="preference_tts_ignore_user_name_numbers_title">Ignorar números nos nomes de utilizador</string>
+    <string name="preference_tts_ignore_user_name_numbers_summary">Lê os nomes de utilizador sem números, p. ex. john1990 como john</string>
     <string name="preference_tts_volume_title">Volume</string>
     <string name="preference_tts_audio_ducking_title">Redução de áudio</string>
     <string name="preference_tts_audio_ducking_summary">Reduzir o volume de outros áudios enquanto o TTS fala</string>
@@ -554,6 +582,17 @@
     <string name="preference_scrollback_length_title">Quantidade de retrocesso de mensagens</string>
     <string name="preference_show_username_title">Mostrar nomes de utilizadores</string>
     <string name="preference_visible_badges_title">Emblemas visíveis</string>
+    <string name="preference_dankchat_account_title">Conta do DankChat</string>
+    <string name="dankchat_badge_automatic">Automático</string>
+    <string name="dankchat_badge_automatic_summary">Atualmente %1$s</string>
+    <string name="dankchat_badge_none">Sem emblema</string>
+    <string name="dankchat_badge_empty">Ainda não tens um emblema do DankChat.</string>
+    <string name="dankchat_badge_logged_out">Inicia sessão para escolheres o teu emblema do DankChat</string>
+    <string name="dankchat_badge_unsupported">O teu início de sessão não pode ser usado aqui. Escolhe o teu emblema em dank.chat.</string>
+    <string name="dankchat_badge_load_failed">Não foi possível carregar os teus emblemas do DankChat</string>
+    <string name="dankchat_badge_save_failed">Não foi possível guardar a tua escolha de emblema</string>
+    <string name="dankchat_account_manage_title">Gerir conta em dank.chat</string>
+    <string name="dankchat_account_manage_summary">Transfere os teus dados ou elimina a tua conta</string>
     <string name="preference_prefer_emote_suggestions_title">Preferir sugestões de emotes</string>
     <string name="preference_prefer_emote_suggestions_summary">Priorizar sugestões de emotes sobre sugestões de utilizadores</string>
     <string name="preference_user_long_click_title">Comportamento de clique longo do utilizador</string>
@@ -561,6 +600,10 @@
     <string name="preference_user_long_click_summary_off">Clique regular abre menções, clique longo abre janela</string>
     <string name="preference_colorize_nicknames_title">Colorir nomes de utilizador</string>
     <string name="preference_colorize_nicknames_summary">Atribuir uma cor aleatória a utilizadores sem cor definida</string>
+    <string name="preference_bold_username_mentions_title">Nomes de utilizador a negrito</string>
+    <string name="preference_bold_username_mentions_summary">Tornar os nomes de utilizador mencionados mais visíveis</string>
+    <string name="preference_color_username_mentions_title">Colorir nomes de utilizador</string>
+    <string name="preference_color_username_mentions_summary">Usar a cor da Twitch do utilizador nos nomes de utilizador mencionados quando disponível</string>
     <string name="preference_tts_force_english_title">Forçar a língua para Inglês</string>
     <string name="preference_tts_force_english_summary">Forçar idioma da voz de TTS para inglês em vez do padrão do sistema</string>
     <string name="preference_visible_emotes_title">Emotes de terceiros visíveis</string>
@@ -569,12 +612,40 @@
     <string name="preference_show_chip_actions_summary">Exibe um botão para alternar em tela cheia, transmissões e ajustar os modos do chat</string>
     <string name="preference_show_character_counter_title">Mostrar contador de caracteres</string>
     <string name="preference_show_character_counter_summary">Exibe a contagem de pontos de código no campo de introdução</string>
+    <string name="preference_show_send_wait_timer_title">Mostrar contagem decrescente do modo lento e da exclusão temporária</string>
+    <string name="preference_show_send_wait_timer_summary">Mostra quanto falta para poderes enviar novamente</string>
     <string name="preference_show_clear_input_button_title">Mostrar botão de limpar introdução</string>
     <string name="preference_show_send_button_title">Mostrar botão de enviar</string>
     <string name="preference_input_group_title">Introdução</string>
     <string name="preference_uploader_header">Carregador de mídia</string>
     <string name="preference_uploader_configure_title">Configurar carregador</string>
     <string name="preference_uploader_recent_uploads_title">Carregamentos recentes</string>
+    <string name="preference_export_header">Exportar</string>
+    <string name="backup_channels_title">Canais</string>
+    <string name="backup_export">Exportar</string>
+    <string name="backup_import">Importar</string>
+    <string name="backup_copy">Copiar para a área de transferência</string>
+    <string name="backup_paste">Colar da área de transferência</string>
+    <string name="backup_channels_description">Exporta todos os canais com os nomes personalizados. A importação só adiciona os canais em falta</string>
+    <string name="backup_settings_description">Exporta todas as definições, exceto a tua sessão</string>
+    <string name="backup_settings_uploader_note">Inclui a tua configuração personalizada do carregador</string>
+    <string name="import_data_confirmation">Substituir as tuas definições, canais, destaques e ignorados pelos importados? A aplicação reinicia a seguir.</string>
+    <string name="export_data_done">Definições exportadas</string>
+    <string name="export_data_failed">Não foi possível guardar o ficheiro</string>
+    <string name="import_data_failed">Não foi possível ler este ficheiro</string>
+    <string name="import_data_newer_version">Esta cópia de segurança foi criada por uma versão mais recente do DankChat</string>
+    <string name="clipboard_no_export">A área de transferência não contém uma exportação</string>
+    <plurals name="channels_exported">
+        <item quantity="one">%1$d canal exportado</item>
+        <item quantity="many">%1$d canais exportados</item>
+        <item quantity="other">%1$d canais exportados</item>
+    </plurals>
+    <plurals name="channels_imported">
+        <item quantity="one">%1$d canal adicionado</item>
+        <item quantity="many">%1$d canais adicionados</item>
+        <item quantity="other">%1$d canais adicionados</item>
+    </plurals>
+    <string name="channels_import_none_new">Todos estes canais já foram adicionados</string>
     <string name="preference_tts_user_ignore_list_title">Lista de utilizadores ignorados</string>
     <string name="preference_tts_user_ignore_list_summary">Lista de utilizadores/contas que serão ignoradas</string>
     <string name="preference_tools_header">Ferramentas</string>
@@ -597,6 +668,8 @@
     <string name="preference_auto_disable_input_title">Desativar a entrada se não estiver conectado ao chat</string>
     <string name="preference_repeated_sending_title">Habilitar envio repetido</string>
     <string name="preference_repeated_sending_summary">Habilita o envio contínuo de mensagens enquanto o botão de envio é pressionado</string>
+    <string name="preference_emote_animation_clock_title">Animações de emotes sincronizadas</string>
+    <string name="preference_emote_animation_clock_summary">Avança os emotes animados em conjunto para redesenhar o ecrã menos vezes</string>
     <string name="oauth_expired_title">Sessão expirada!</string>
     <string name="oauth_expired_message">O teu token de início de sessão expirou! Por favor, inicia sessão outra vez.</string>
     <string name="oauth_expired_login_again">Inicia sessão novamente</string>
@@ -605,8 +678,8 @@
     <string name="preference_stream_live_messages_summary">Adiciona uma mensagem no chat quando um canal começa ou termina o direto</string>
     <string name="preference_stream_extensions_title">Mostrar extensões da stream</string>
     <string name="preference_stream_extensions_summary">Mostra as sobreposições de extensões no leitor da stream</string>
-    <string name="preference_retain_webview_title">Impedir recarregamentos da stream</string>
-    <string name="preference_retain_webview_summary">Permite a prevenção experimental de recargas da stream após mudanças da orientação ou reabertura do DankChat.</string>
+    <string name="preference_keep_stream_while_typing_title">Manter a stream visível ao escrever</string>
+    <string name="preference_keep_stream_while_typing_summary">Mostra a stream na vertical mesmo quando o teclado ou o menu de emotes deixam pouco espaço para o chat</string>
     <string name="preference_show_changelogs">Mostrar lista de alterações após uma actualização</string>
     <string name="preference_whats_new_header">O que há de novo</string>
     <string name="preference_custom_login_title">Início de sessão customizado</string>
@@ -674,6 +747,7 @@
     <string name="highlights_ignores_entry_elevated_messages">Mensagens elevadas</string>
     <string name="highlights_ignores_entry_redemptions">Destaques resgatados com pontos de canal</string>
     <string name="highlights_ignores_entry_replies">Respostas</string>
+    <string name="highlights_ignores_entry_inline_whispers">Sussurros no chat</string>
     <string name="highlights_ignores_entry_custom">Personalizado</string>
     <string name="highlights_messages_title">Cria notificações e mensagens de destaque baseadas em certos padrões.</string>
     <string name="highlights_users_title">Cria notificações e destaca mensagens de certos utilizadores.</string>
@@ -683,6 +757,8 @@
     <string name="ignores_users_title">Ignora mensagens de certos utilizadores.</string>
     <string name="ignores_twitch_title">Gere utilizadores bloqueados da Twitch.</string>
     <string name="preference_notification_whisper_title">Criar notificações para sussurros</string>
+    <string name="preference_notification_profile_pictures_title">Mostrar imagens de perfil</string>
+    <string name="preference_notification_profile_pictures_summary">Usar as imagens de perfil dos canais e utilizadores em vez do ícone do DankChat</string>
     <string name="login_outdated_title">Login desatualizado!</string>
     <string name="login_outdated_message">O teu login está desatualizado e não tem acesso a algumas funcionalidades. Por favor, faz login novamente.</string>
     <string name="custom_user_display_title">Exibição de utilizador personalizada</string>
@@ -703,6 +779,9 @@
     <string name="message_more_actions">Mais…</string>
     <string name="message_jump_to">Ir para a mensagem</string>
     <string name="message_pin">Fixar mensagem</string>
+    <string name="message_warn">Avisar</string>
+    <string name="message_warn_reason">Motivo</string>
+    <string name="message_warn_confirm">Avisar</string>
     <string name="message_not_in_history">Mensagem já não está no histórico do chat</string>
     <string name="message_history">Histórico de mensagens</string>
     <string name="global_history_title">Histórico global</string>
@@ -717,6 +796,7 @@
     <string name="log_viewer_search_hint">Pesquisar nos registos</string>
     <plurals name="log_viewer_selected_count">
         <item quantity="one">%1$d selecionados</item>
+        <item quantity="many">%1$d selecionados</item>
         <item quantity="other">%1$d selecionados</item>
     </plurals>
     <string name="log_viewer_copy_selection">Copiar registos selecionados</string>
@@ -785,15 +865,18 @@
     <string name="shared_chat">Chat partilhado</string>
     <plurals name="viewers_and_uptime">
         <item quantity="one">Ao vivo com %1$d espectador à %2$s</item>
+        <item quantity="many">Ao vivo com %1$d de espectadores à %2$s</item>
         <item quantity="other">Ao vivo com %1$d espectadores à %2$s</item>
     </plurals>
     <plurals name="months">
         <item quantity="one">%d mês</item>
+        <item quantity="many">%d de meses</item>
         <item quantity="other">%d meses</item>
     </plurals>
     <string name="open_source_licenses">Licenças de código aberto</string>
     <plurals name="viewers_and_uptime_with_cateogry" comment="Live with 1 viewer in Just Chatting for 1h 1m&#13;&#10;Live with 10 viewers in Just Chatting for 1h 1m">
         <item quantity="one">Em direto com %1$d espectador em %2$s durante %3$s</item>
+        <item quantity="many">Em direto com %1$d de espectadores em %2$s durante %3$s</item>
         <item quantity="other">Em direto com %1$d espectadores em %2$s durante %3$s</item>
     </plurals>
     <string name="preference_streaminfo_category_title">Mostrar categoria da transmissão</string>
@@ -892,6 +975,8 @@
     <string name="cmd_fail_ban">Falha ao banir o utilizador - %1$s</string>
     <string name="cmd_usage_unban">Utilização: %1$s &lt;nome de utilizador&gt; - Remove o banimento de um utilizador.</string>
     <string name="cmd_fail_unban">Falha ao desbanir o utilizador - %1$s</string>
+    <string name="cmd_usage_warn">Utilização: %1$s &lt;nome de utilizador&gt; &lt;motivo&gt; - Avisa um utilizador. O motivo é obrigatório e será mostrado ao utilizador alvo e a outros moderadores.</string>
+    <string name="cmd_fail_warn">Falha ao avisar o utilizador - %1$s</string>
     <string name="cmd_usage_timeout">Utilização: %1$s &lt;nome de utilizador&gt; [duração][unidade de tempo] [motivo] - Impede temporariamente um utilizador de conversar. A duração (opcional, predefinição: 10 minutos) deve ser um inteiro positivo; a unidade de tempo (opcional, predefinição: s) deve ser s, m, h, d ou w; a duração máxima é de 2 semanas. O motivo é opcional e será mostrado ao utilizador alvo e a outros moderadores.</string>
     <string name="cmd_timeout_cannot_self">Falha ao banir o utilizador - Não podes aplicar timeout a ti próprio.</string>
     <string name="cmd_timeout_cannot_broadcaster">Falha ao banir o utilizador - Não podes aplicar timeout ao broadcaster.</string>
@@ -908,6 +993,7 @@
     <string name="cmd_usage_commercial">Utilização: /commercial &lt;duração&gt; - Inicia um anúncio com a duração especificada para o canal atual. As durações válidas são 30, 60, 90, 120, 150 e 180 segundos.</string>
     <plurals name="cmd_success_commercial">
         <item quantity="one">A iniciar intervalo publicitário de %1$d segundos. Lembra-te que ainda estás em direto e nem todos os espetadores receberão o anúncio. Podes iniciar outro anúncio dentro de %2$d segundos.</item>
+        <item quantity="many">A iniciar intervalo publicitário de %1$d de segundos. Lembra-te que ainda estás em direto e nem todos os espetadores receberão o anúncio. Podes iniciar outro anúncio dentro de %2$d segundos.</item>
         <item quantity="other">A iniciar intervalo publicitário de %1$d segundos. Lembra-te que ainda estás em direto e nem todos os espetadores receberão o anúncio. Podes iniciar outro anúncio dentro de %2$d segundos.</item>
     </plurals>
     <string name="cmd_fail_commercial">Falha ao iniciar o anúncio - %1$s</string>
@@ -933,6 +1019,14 @@
     <string name="cmd_usage_shoutout">Utilização: %1$s &lt;nome de utilizador&gt; - Envia um shoutout ao utilizador Twitch especificado.</string>
     <string name="cmd_success_shoutout">Shoutout enviado para %1$s</string>
     <string name="cmd_fail_shoutout">Falha ao enviar shoutout - %1$s</string>
+    <string name="cmd_usage_set_title">Utilização: %1$s &lt;título da transmissão&gt;</string>
+    <string name="cmd_success_set_title">Título atualizado para %1$s</string>
+    <string name="cmd_fail_set_title">Falha ao definir o título - %1$s</string>
+    <string name="cmd_usage_set_game">Utilização: %1$s &lt;jogo da transmissão&gt;</string>
+    <string name="cmd_game_not_found">Jogo não encontrado.</string>
+    <string name="cmd_success_set_game">Jogo atualizado para %1$s</string>
+    <string name="cmd_fail_search_game">Falha ao procurar o jogo - %1$s</string>
+    <string name="cmd_fail_set_game">Falha ao definir o jogo - %1$s</string>
     <string name="cmd_shield_activated">O modo escudo foi ativado.</string>
     <string name="cmd_shield_deactivated">O modo escudo foi desativado.</string>
     <string name="cmd_fail_shield">Falha ao atualizar o modo escudo - %1$s</string>
@@ -949,6 +1043,7 @@
     <string name="cmd_error_already_banned">%1$s já está banido neste canal.</string>
     <string name="cmd_error_cannot_perform">Não podes %1$s %2$s.</string>
     <string name="cmd_error_conflicting_ban">Houve uma operação de banimento conflituante neste utilizador. Tenta novamente.</string>
+    <string name="cmd_error_conflicting_warn">Houve uma operação de aviso conflituante neste utilizador. Tenta novamente.</string>
     <string name="cmd_error_invalid_color">A cor deve ser uma das cores suportadas pelo Twitch (%1$s) ou um hex code (#000000) se tiveres Turbo ou Prime.</string>
     <string name="cmd_error_commercial_not_streaming">Tens de estar em direto para executar anúncios.</string>
     <string name="cmd_error_commercial_rate_limited">Tens de esperar que o período de espera expire antes de executar outro anúncio.</string>

@@ -59,8 +59,9 @@ sealed interface ChatEvent {
         val isAnonymous: Boolean,
     ) : ChatEvent
 
-    data class ChannelNonExistent(
+    data class JoinTimedOut(
         val channel: UserName,
+        val isAnonymous: Boolean,
     ) : ChatEvent
 
     data class Error(
@@ -82,6 +83,7 @@ class ChatConnection(
     private val authDataStore: AuthDataStore,
     dispatchersProvider: DispatchersProvider,
     private val serviceActive: StateFlow<Boolean>,
+    private val activeChannel: StateFlow<UserName?>,
     private val url: String = IRC_URL,
     private val pongTimeout: Duration = PONG_TIMEOUT,
 ) {
@@ -97,12 +99,14 @@ class ChatConnection(
 
     private val receiveChannel = Channel<ChatEvent>(capacity = Channel.BUFFERED)
 
+    @Volatile
     private var awaitingPong = false
 
     @Volatile
     private var pongReceived: CompletableDeferred<Unit>? = null
+    private var verifyJob: Job? = null
 
-    private val channels = mutableSetOf<UserName>()
+    private val channels = ConcurrentSet<UserName>()
     private val channelsAttemptedToJoin = ConcurrentSet<UserName>()
     private val channelsToJoin = Channel<Collection<UserName>>(capacity = Channel.BUFFERED)
     private var currentUserName: UserName? = null
@@ -115,7 +119,7 @@ class ChatConnection(
 
     val messages =
         receiveChannel.receiveAsFlow().distinctUntilChanged { old, new ->
-            (old.isDisconnected && new.isDisconnected) || old == new
+            old.isDisconnected && new.isDisconnected
         }
 
     init {
@@ -125,22 +129,32 @@ class ChatConnection(
                 val currentSession = session ?: return@collect
 
                 channelsToJoin
-                    .filter { it in channels }
                     .chunked(JOIN_CHUNK_SIZE)
-                    .forEach { chunk ->
+                    .forEach { queued ->
+                        // A reconnect queues a full join on the new session, drop the rest of this one
+                        if (session !== currentSession || !_connected.value) {
+                            return@collect
+                        }
+
+                        // Chunks wait for the ones before them, a channel removed in the meantime is skipped
+                        val chunk = queued.filter { it in channels }
+                        if (chunk.isEmpty()) {
+                            return@forEach
+                        }
+
                         runCatching { currentSession.joinChannels(chunk) }
                         channelsAttemptedToJoin.addAll(chunk)
-                        setupJoinCheckInterval(chunk)
+                        setupJoinCheckInterval(chunk, currentSession)
                         delay(duration = chunk.size * JOIN_DELAY)
                     }
             }
         }
     }
 
-    suspend fun sendMessage(msg: String) {
-        val currentSession = session ?: return
-        if (!_connected.value) return
-        runCatching { currentSession.sendIrc(msg) }
+    suspend fun sendMessage(msg: String): Boolean {
+        val currentSession = session ?: return false
+        if (!_connected.value) return false
+        return runCatching { currentSession.sendIrc(msg) }.isSuccess
     }
 
     fun joinChannels(channelList: List<UserName>) {
@@ -151,6 +165,15 @@ class ChatConnection(
             scope.launch {
                 channelsToJoin.send(newChannels)
             }
+        }
+    }
+
+    // Joins can go unanswered, a join that timed out is sent again for channels that still exist
+    fun rejoinChannel(channel: UserName) {
+        if (channel !in channels || !_connected.value) return
+
+        scope.launch {
+            channelsToJoin.send(listOf(channel))
         }
     }
 
@@ -181,18 +204,20 @@ class ChatConnection(
 
         currentUserName = authDataStore.userName
         currentOAuth = authDataStore.oAuthKey
-        awaitingPong = false
 
         connectionJob =
             scope.launch(webSocketCoroutineExceptionHandler("Chat $chatConnectionType")) {
                 var retryCount = 1
-                while (retryCount <= RECONNECT_MAX_ATTEMPTS) {
+                while (true) {
                     var serverRequestedReconnect = false
+                    var loginFailed = false
                     try {
                         client.webSocket(url) {
                             session = this
                             _connected.value = true
                             retryCount = 1
+                            // A pong still pending from the previous session never arrives
+                            awaitingPong = false
 
                             val auth = currentOAuth?.takeIf { !isAnonymous } ?: "NaM"
                             val nick = currentUserName?.takeIf { !isAnonymous } ?: "justinfan12781923"
@@ -215,11 +240,18 @@ class ChatConnection(
                                                 (frame as? Frame.Text)?.readText() ?: continue
                                             }
                                         }
+                                    // Any traffic proves the connection is alive
+                                    pongReceived?.complete(Unit)
 
                                     text.removeSuffix("\r\n").split("\r\n").forEach { line ->
-                                        val ircMessage = IrcMessage.parse(line)
+                                        val ircMessage =
+                                            runCatching { IrcMessage.parse(line) }.getOrElse {
+                                                logger.warn(it) { "[$chatConnectionType] skipping malformed line" }
+                                                return@forEach
+                                            }
                                         if (ircMessage.isLoginFailed()) {
                                             logger.error { "[$chatConnectionType] authentication failed with expired token, closing connection.." }
+                                            loginFailed = true
                                             receiveChannel.send(ChatEvent.LoginFailed)
                                             return@webSocket
                                         }
@@ -228,7 +260,7 @@ class ChatConnection(
                                             "376" -> {
                                                 logger.info { "[$chatConnectionType] connected to irc" }
                                                 pingJob = setupPingInterval()
-                                                channelsToJoin.send(channels)
+                                                channelsToJoin.send(channelsInJoinOrder())
                                             }
 
                                             "JOIN" -> {
@@ -243,7 +275,12 @@ class ChatConnection(
                                             }
 
                                             "366" -> {
-                                                receiveChannel.send(ChatEvent.Connected(ircMessage.params[1].substring(1).toUserName(), isAnonymous))
+                                                val channel =
+                                                    ircMessage.params
+                                                        .getOrNull(1)
+                                                        ?.substring(1)
+                                                        ?.toUserName() ?: return@forEach
+                                                receiveChannel.send(ChatEvent.Connected(channel, isAnonymous))
                                             }
 
                                             "PING" -> {
@@ -252,7 +289,6 @@ class ChatConnection(
 
                                             "PONG" -> {
                                                 awaitingPong = false
-                                                pongReceived?.complete(Unit)
                                             }
 
                                             "RECONNECT" -> {
@@ -263,7 +299,11 @@ class ChatConnection(
 
                                             else -> {
                                                 if (ircMessage.command == "NOTICE" && ircMessage.tags["msg-id"] == "msg_channel_suspended") {
-                                                    channelsAttemptedToJoin.remove(ircMessage.params[0].substring(1).toUserName())
+                                                    ircMessage.params
+                                                        .getOrNull(0)
+                                                        ?.substring(1)
+                                                        ?.toUserName()
+                                                        ?.let(channelsAttemptedToJoin::remove)
                                                 }
                                                 receiveChannel.send(ChatEvent.Message(ircMessage))
                                             }
@@ -280,11 +320,26 @@ class ChatConnection(
                         channelsAttemptedToJoin.clear()
                         receiveChannel.send(ChatEvent.Closed)
 
-                        if (!serverRequestedReconnect) {
-                            logger.info { "[$chatConnectionType] connection closed" }
-                            return@launch
+                        when {
+                            loginFailed -> {
+                                logger.info { "[$chatConnectionType] connection closed after failed login" }
+                                return@launch
+                            }
+
+                            serverRequestedReconnect -> {
+                                logger.info { "[$chatConnectionType] reconnecting after server request" }
+                            }
+
+                            !serviceActive.value -> {
+                                logger.info { "[$chatConnectionType] connection closed, foreground service inactive, not retrying" }
+                                return@launch
+                            }
+
+                            else -> {
+                                logger.info { "[$chatConnectionType] connection closed by the server, reconnecting" }
+                                delay(RECONNECT_BASE_DELAY + randomJitter())
+                            }
                         }
-                        logger.info { "[$chatConnectionType] reconnecting after server request" }
                     } catch (t: CancellationException) {
                         throw t
                     } catch (t: Throwable) {
@@ -303,13 +358,9 @@ class ChatConnection(
                         val jitter = randomJitter()
                         val reconnectDelay = RECONNECT_BASE_DELAY * (1 shl (retryCount - 1))
                         delay(reconnectDelay + jitter)
-                        retryCount = (retryCount + 1).coerceAtMost(RECONNECT_MAX_ATTEMPTS)
+                        retryCount = (retryCount + 1).coerceAtMost(RECONNECT_MAX_BACKOFF_STEPS)
                     }
                 }
-
-                logger.error { "[$chatConnectionType] connection failed after $RECONNECT_MAX_ATTEMPTS retries" }
-                _connected.value = false
-                session = null
             }
     }
 
@@ -335,13 +386,21 @@ class ChatConnection(
 
     fun reconnectIfNecessary() {
         val currentSession = session
+        // Still connecting or waiting for a retry
+        if (currentSession == null && connectionJob?.isActive == true) {
+            return
+        }
+
         if (currentSession?.isActive != true || currentSession.incoming.isClosedForReceive) {
             logger.info { "[$chatConnectionType] connection lost, reconnecting" }
             reconnect()
             return
         }
 
-        verifyConnection(currentSession)
+        // Quick background and foreground switches share one check, a second one would take over the pending pong
+        if (verifyJob?.isActive != true) {
+            verifyJob = verifyConnection(currentSession)
+        }
     }
 
     // A session can still look active with a dead TCP socket, e.g. after the app was frozen in the background.
@@ -356,6 +415,12 @@ class ChatConnection(
             logger.info { "[$chatConnectionType] no pong received, reconnecting" }
             reconnect()
         }
+    }
+
+    // The input of a channel stays disabled until its own join completes, so the active channel goes first
+    private fun channelsInJoinOrder(): List<UserName> {
+        val active = activeChannel.value
+        return channels.sortedByDescending { it == active }
     }
 
     private fun randomJitter() = Random.nextLong(range = 0L..MAX_JITTER).milliseconds
@@ -374,22 +439,30 @@ class ChatConnection(
         }
     }
 
-    private fun setupJoinCheckInterval(channelsToCheck: List<UserName>) = scope.launch {
+    private fun setupJoinCheckInterval(
+        channelsToCheck: List<UserName>,
+        joinSession: DefaultClientWebSocketSession,
+    ) = scope.launch {
         logger.debug { "[$chatConnectionType] setting up join check for $channelsToCheck" }
-        if (session?.isActive != true || !_connected.value || channelsAttemptedToJoin.isEmpty()) {
+        if (session !== joinSession || !_connected.value || channelsAttemptedToJoin.isEmpty()) {
             return@launch
         }
 
-        delay(JOIN_CHECK_DELAY)
-        if (session?.isActive != true || !_connected.value) {
+        // Logged in users verify timed out joins via Helix, anonymous ones only have the timeout
+        val anonymous = isAnonymous
+        val checkDelay = when {
+            anonymous -> ANONYMOUS_JOIN_CHECK_DELAY
+            else -> JOIN_CHECK_DELAY
+        }
+        delay(checkDelay)
+        if (session !== joinSession || !_connected.value) {
             channelsAttemptedToJoin.removeAll(channelsToCheck.toSet())
             return@launch
         }
 
         channelsToCheck.forEach {
-            if (it in channelsAttemptedToJoin) {
-                channelsAttemptedToJoin.remove(it)
-                receiveChannel.send(ChatEvent.ChannelNonExistent(it))
+            if (channelsAttemptedToJoin.remove(it)) {
+                receiveChannel.send(ChatEvent.JoinTimedOut(it, anonymous))
             }
         }
     }
@@ -408,10 +481,11 @@ class ChatConnection(
         private const val IRC_URL = "wss://irc-ws.chat.twitch.tv"
         private const val MAX_JITTER = 250L
         private val RECONNECT_BASE_DELAY = 1.seconds
-        private const val RECONNECT_MAX_ATTEMPTS = 4
+        private const val RECONNECT_MAX_BACKOFF_STEPS = 4
         private val PING_INTERVAL = 5.minutes
         private val PONG_TIMEOUT = 10.seconds
         private val JOIN_CHECK_DELAY = 10.seconds
+        private val ANONYMOUS_JOIN_CHECK_DELAY = 30.seconds
         private val JOIN_DELAY = 600.milliseconds
         private const val JOIN_CHUNK_SIZE = 5
     }

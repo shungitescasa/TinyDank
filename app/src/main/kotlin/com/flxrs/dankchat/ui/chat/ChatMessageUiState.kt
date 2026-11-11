@@ -49,8 +49,11 @@ sealed interface ChatMessageUiState {
         val nameText: String,
         val message: String,
         val links: ImmutableList<LinkUi>,
+        val usernameMentions: ImmutableList<UsernameMentionUi>,
         val emotes: ImmutableList<EmoteUi>,
+        val gifContentParts: ImmutableList<TwitchGifContentPartUi> = persistentListOf(),
         val isAction: Boolean,
+        val isAsciiArt: Boolean = false,
         val thread: ThreadUi?,
         val highlightHeader: TextResource? = null,
         val highlightHeaderImageUrl: String? = null,
@@ -219,6 +222,9 @@ sealed interface ChatMessageUiState {
         val userId: UserId,
         val userName: UserName,
         val displayName: DisplayName,
+        val recipientId: UserId?,
+        val recipientUserName: UserName,
+        val recipientDisplayName: DisplayName,
         val badges: ImmutableList<BadgeUi>,
         val rawSenderColor: Int,
         val rawRecipientColor: Int,
@@ -227,10 +233,24 @@ sealed interface ChatMessageUiState {
         val message: String,
         val links: ImmutableList<LinkUi>,
         val emotes: ImmutableList<EmoteUi>,
+        val isAsciiArt: Boolean = false,
         val fullMessage: String,
         val replyTargetName: UserName,
+        val replyTargetUserId: UserId?,
+        val replyTargetDisplayName: DisplayName,
+        val replyTargetBadges: ImmutableList<BadgeUi>,
     ) : ChatMessageUiState
 }
+
+@Immutable
+data class UsernameMentionUi(
+    val start: Int,
+    val end: Int,
+    val userName: UserName,
+    val displayName: DisplayName,
+    val rawColor: Int?,
+    val isBold: Boolean,
+)
 
 @Immutable
 data class BadgeUi(
@@ -252,6 +272,28 @@ data class EmoteUi(
     val cheerAmount: Int? = null,
     val cheerColor: Color? = null,
 )
+
+@Immutable
+data class TwitchGifUi(
+    val id: String,
+    val url: String,
+    val altText: String,
+)
+
+@Immutable
+sealed interface TwitchGifContentPartUi {
+    /** A range of the message text, links, emotes and mentions keep their message positions. */
+    @Immutable
+    data class Text(
+        val start: Int,
+        val endExclusive: Int,
+    ) : TwitchGifContentPartUi
+
+    @Immutable
+    data class Gif(
+        val gif: TwitchGifUi,
+    ) : TwitchGifContentPartUi
+}
 
 @Immutable
 data class ThreadUi(

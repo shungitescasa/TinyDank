@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -37,6 +38,7 @@ import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.PagerState
@@ -61,7 +63,6 @@ import androidx.compose.material3.RichTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TooltipState
@@ -98,6 +99,7 @@ import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -115,6 +117,7 @@ import com.composeunstyled.rememberScrollAreaState
 import com.flxrs.dankchat.R
 import com.flxrs.dankchat.data.UserName
 import com.flxrs.dankchat.ui.main.channel.ChannelTabUiState
+import com.flxrs.dankchat.ui.main.input.rememberTourTooltipPositionProvider
 import com.flxrs.dankchat.ui.main.stream.AudioOnlyBar
 import com.flxrs.dankchat.ui.theme.toolbarPillColor
 import com.flxrs.dankchat.utils.compose.PagerTabIndicator
@@ -124,9 +127,9 @@ import com.flxrs.dankchat.utils.compose.reportPosition
 import com.flxrs.dankchat.utils.compose.selectedIndicatorBar
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.first
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.roundToInt
 
 @Suppress("MultipleEmitters")
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -143,6 +146,7 @@ fun FloatingToolbar(
     totalMentionCount: Int,
     hasActivePinnedMessage: Boolean,
     isPinnedMessageShown: Boolean,
+    channelNotificationsEnabled: Boolean,
     onAction: (ToolbarAction) -> Unit,
     onAudioOnly: () -> Unit,
     onStreamClose: () -> Unit,
@@ -150,6 +154,7 @@ fun FloatingToolbar(
     endAligned: Boolean = false,
     showTabs: Boolean = true,
     addChannelTooltipState: TooltipState? = null,
+    onAddChannelTooltipShow: () -> Unit = {},
     onAddChannelTooltipDismiss: () -> Unit = {},
     onSkipTour: () -> Unit = {},
     menuMaxHeightDp: Dp = 0.dp,
@@ -168,17 +173,18 @@ fun FloatingToolbar(
     var toolbarRowHeight by remember { mutableFloatStateOf(0f) }
 
     val hasStream = currentStream != null && streamHeightDp > 0.dp
-    val statusBarTopPx = WindowInsets.statusBars.getTop(density)
+    // Split screen can hide the status bar, so the toolbar clears the display cutout as well
+    val topInsetPx = WindowInsets.statusBars.union(WindowInsets.displayCutout).getTop(density)
     val toolbarBottomPx = with(density) {
         // Under a stream the toolbar sits below the video instead of the status bar
         val toolbarTopPx =
             when {
                 hasStream -> streamHeightDp.roundToPx()
-                else -> statusBarTopPx
+                else -> topInsetPx
             }
         when {
             isFullscreen -> 0
-            !showAppBar -> statusBarTopPx
+            !showAppBar -> topInsetPx
             else -> toolbarTopPx + (8.dp.toPx() + 16.dp.toPx()).toInt() + toolbarRowHeight.toInt()
         }
     }
@@ -248,7 +254,7 @@ fun FloatingToolbar(
                 .graphicsLayer { alpha = streamToolbarAlpha() },
     ) {
         val scrimColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
-        val statusBarPx = statusBarTopPx.toFloat()
+        val topInset = topInsetPx.toFloat()
         val scrimModifier =
             if (hasStream) {
                 Modifier.fillMaxWidth()
@@ -257,7 +263,7 @@ fun FloatingToolbar(
                     .fillMaxWidth()
                     .drawBehind {
                         if (toolbarRowHeight > 0f) {
-                            val gradientHeight = statusBarPx + 8.dp.toPx() + toolbarRowHeight + 16.dp.toPx()
+                            val gradientHeight = topInset + 8.dp.toPx() + toolbarRowHeight + 16.dp.toPx()
                             drawRect(
                                 brush =
                                     Brush.verticalGradient(
@@ -269,7 +275,7 @@ fun FloatingToolbar(
                                 size = Size(size.width, gradientHeight),
                             )
                         }
-                    }.padding(top = with(density) { WindowInsets.statusBars.getTop(density).toDp() } + 8.dp)
+                    }.padding(top = with(density) { topInsetPx.toDp() } + 8.dp)
             }
 
         Column(modifier = scrimModifier) {
@@ -537,7 +543,7 @@ fun FloatingToolbar(
                                         modifier =
                                             Modifier
                                                 .width(IntrinsicSize.Min)
-                                                .widthIn(min = 125.dp, max = 280.dp)
+                                                .widthIn(min = 180.dp, max = 280.dp)
                                                 .heightIn(max = quickSwitchMaxHeightDp),
                                     ) {
                                         // Freeze the displayed selection while the dropdown is closing so the newly
@@ -574,7 +580,7 @@ fun FloatingToolbar(
                                                                 showQuickSwitch = false
                                                             }.selectedIndicatorBar(isSelected, selectedIndicatorColor)
                                                             .defaultMinSize(minHeight = 48.dp)
-                                                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                                                            .padding(start = 20.dp, end = 24.dp, top = 10.dp, bottom = 10.dp),
                                                     verticalAlignment = Alignment.CenterVertically,
                                                     horizontalArrangement = Arrangement.Start,
                                                 ) {
@@ -631,9 +637,7 @@ fun FloatingToolbar(
                     // Lesser actions move into the more menu before the switcher runs out of room
                     val optionalActions =
                         buildList {
-                            if (isLoggedIn) {
-                                add(ToolbarAction.OpenMentions)
-                            }
+                            add(ToolbarAction.OpenMentions)
                             if (hasActivePinnedMessage) {
                                 add(ToolbarAction.TogglePinnedMessage)
                             }
@@ -700,11 +704,6 @@ fun FloatingToolbar(
                                     color = MaterialTheme.colorScheme.toolbarPillColor,
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        // Reserve space at start when menu is open and not logged in,
-                                        // so the pill matches the 3-icon width and icons stay end-aligned
-                                        if (!isLoggedIn && showOverflowMenu) {
-                                            Spacer(modifier = Modifier.width(48.dp))
-                                        }
                                         // Animate the measured width instead of using AnimatedVisibility: the pill
                                         // sits in an IntrinsicSize.Min column, and AnimatedVisibility reports the
                                         // full intrinsic width during its exit, making the tabs pill jump afterwards
@@ -755,17 +754,14 @@ fun FloatingToolbar(
                                                     addChannelTooltipState.show()
                                                 }
                                                 LaunchedEffect(Unit) {
-                                                    snapshotFlow { addChannelTooltipState.isVisible }
-                                                        .dropWhile { !it } // skip initial false
-                                                        .first { !it } // wait for dismiss (any cause)
+                                                    val isVisible = snapshotFlow { addChannelTooltipState.isVisible }
+                                                    isVisible.first { it }
+                                                    onAddChannelTooltipShow()
+                                                    isVisible.first { !it } // wait for dismiss (any cause)
                                                     onAddChannelTooltipDismiss()
                                                 }
                                                 TooltipBox(
-                                                    positionProvider =
-                                                        TooltipDefaults.rememberTooltipPositionProvider(
-                                                            TooltipAnchorPosition.Above,
-                                                            spacingBetweenTooltipAndAnchor = 8.dp,
-                                                        ),
+                                                    positionProvider = rememberTourTooltipPositionProvider(spacingToAnchor = 8.dp),
                                                     tooltip = {
                                                         val tourColors =
                                                             TooltipDefaults.richTooltipColors(
@@ -807,7 +803,7 @@ fun FloatingToolbar(
 
                                             ToolbarAction.AddChannel !in collapsedToolbarActions -> addChannelIcon()
                                         }
-                                        if (isLoggedIn && ToolbarAction.OpenMentions !in collapsedToolbarActions) {
+                                        if (ToolbarAction.OpenMentions !in collapsedToolbarActions) {
                                             IconButton(onClick = { onAction(ToolbarAction.OpenMentions) }) {
                                                 Icon(
                                                     imageVector = when {
@@ -879,6 +875,7 @@ fun FloatingToolbar(
                                 ) {
                                     InlineOverflowMenu(
                                         isLoggedIn = isLoggedIn,
+                                        channelNotificationsEnabled = channelNotificationsEnabled,
                                         onDismiss = {
                                             showOverflowMenu = false
                                             overflowInitialMenu = AppBarMenu.Main
@@ -898,7 +895,8 @@ fun FloatingToolbar(
     }
 }
 
-// Popups measure up to the window width and hang off the end edge, invisible to the pill's intrinsic width
+// Popups measure up to the window width and hang off the end edge, invisible to the pill's intrinsic width.
+// A popup wider than the space before the pill's end shifts right so it never leaves the window.
 private fun Modifier.endAlignedOverflow(maxWidthPx: Int) = this.then(
     object : LayoutModifier {
         override fun MeasureScope.measure(
@@ -906,12 +904,15 @@ private fun Modifier.endAlignedOverflow(maxWidthPx: Int) = this.then(
             constraints: Constraints,
         ): MeasureResult {
             val parentWidth = constraints.maxWidth
+            val windowMarginPx = POPUP_WINDOW_MARGIN.roundToPx()
             val placeable =
                 measurable.measure(
-                    constraints.copy(minWidth = 0, maxWidth = maxWidthPx),
+                    constraints.copy(minWidth = 0, maxWidth = (maxWidthPx - windowMarginPx * 2).coerceAtLeast(0)),
                 )
             return layout(parentWidth, placeable.height) {
-                placeable.place(parentWidth - placeable.width, 0)
+                val parentWindowX = coordinates?.positionInWindow()?.x?.roundToInt() ?: 0
+                val endAlignedX = parentWidth - placeable.width
+                placeable.place(maxOf(endAlignedX, windowMarginPx - parentWindowX), 0)
             }
         }
 
@@ -978,6 +979,7 @@ private fun Modifier.skipIntrinsicHeight() = this.then(
 
 private val TOOLBAR_ACTION_SLOT_WIDTH = 48.dp
 private val MIN_TABS_PILL_WIDTH = 120.dp
+private val POPUP_WINDOW_MARGIN = 8.dp
 
 // Row padding on both sides plus the spacer between the pills
 private val TOOLBAR_PILL_SPACING = 24.dp

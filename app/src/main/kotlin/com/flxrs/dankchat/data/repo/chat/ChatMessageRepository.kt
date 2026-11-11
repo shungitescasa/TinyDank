@@ -8,6 +8,7 @@ import com.flxrs.dankchat.data.twitch.message.ModerationMessage
 import com.flxrs.dankchat.data.twitch.message.PrivMessage
 import com.flxrs.dankchat.data.twitch.message.SystemMessageType
 import com.flxrs.dankchat.data.twitch.message.hasMention
+import com.flxrs.dankchat.data.twitch.message.WhisperMessage
 import com.flxrs.dankchat.di.DispatchersProvider
 import com.flxrs.dankchat.preferences.chat.ChatSettingsDataStore
 import com.flxrs.dankchat.preferences.developer.ChatSendProtocol
@@ -44,11 +45,13 @@ class ChatMessageRepository(
     private val messageDecryptor: MessageDecryptor,
     private val chatNotificationRepository: ChatNotificationRepository,
     private val dispatchersProvider: DispatchersProvider,
-    chatSettingsDataStore: ChatSettingsDataStore,
+    private val chatSettingsDataStore: ChatSettingsDataStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + dispatchersProvider.default)
     private val messages = ConcurrentHashMap<UserName, MutableStateFlow<List<ChatItem>>>()
+    private val historyHandoffs = ConcurrentHashMap<UserName, HistoryHandoff>()
     private val _chatLoadingFailures = MutableStateFlow(emptySet<ChatLoadingFailure>())
+    private val _reparseCount = MutableStateFlow(0)
     private val _sessionMessageCount = AtomicInt(0)
     private val _ircSentCount = AtomicInt(0)
     private val _helixSentCount = AtomicInt(0)
@@ -78,10 +81,13 @@ class ChatMessageRepository(
                         flow.update { it.takeLast(length) }
                     }
                 }
-            }.stateIn(scope, SharingStarted.Eagerly, 500)
+            }.stateIn(scope, SharingStarted.Eagerly, chatSettingsDataStore.current().scrollbackLength)
     val scrollBackLength get() = scrollBackLengthFlow.value
 
     val chatLoadingFailures = _chatLoadingFailures.asStateFlow()
+
+    // Increments after emotes and badges were reparsed, for messages that are mapped outside the channel buffers
+    val reparseCount: StateFlow<Int> = _reparseCount.asStateFlow()
 
     fun getChat(channel: UserName): StateFlow<List<ChatItem>> = messages.getOrPut(channel) { MutableStateFlow(emptyList()) }.also {
         updateChannelKeys()
@@ -99,10 +105,11 @@ class ChatMessageRepository(
     }
 
     fun getAllChat(): Flow<List<ChatItem>> = _channelKeys.flatMapLatest { keys ->
+        val flows = keys.mapNotNull { messages[it] }
         when {
-            keys.isEmpty() -> flowOf(emptyList())
+            flows.isEmpty() -> flowOf(emptyList())
 
-            else -> combine(keys.map { getChat(it) }) { arrays ->
+            else -> combine(flows) { arrays ->
                 arrays
                     .flatMap { it }
                     // Global notices are broadcast to all channels with the same message id
@@ -161,16 +168,44 @@ class ChatMessageRepository(
         }
     }
 
-    fun applyModerationMessage(message: ModerationMessage) {
-        messages[message.channel]?.update { current ->
-            when (message.action) {
-                ModerationMessage.Action.Delete,
-                ModerationMessage.Action.SharedDelete,
-                -> current.replaceWithTimeout(message, scrollBackLength, messageProcessor::onMessageRemoved)
+    /**
+     * Messages a history load added can still be queued behind the live connection.
+     * Their live copies are skipped until a newer live message shows the backlog is processed.
+     */
+    fun handOffHistory(
+        channel: UserName,
+        items: List<ChatItem>,
+    ) {
+        val newestTimestamp = items.maxOfOrNull { it.message.timestamp } ?: return
+        historyHandoffs[channel] = HistoryHandoff(items.map { it.message.id }.toSet(), newestTimestamp)
+    }
 
-                else -> current.replaceOrAddModerationMessage(message, scrollBackLength, messageProcessor::onMessageRemoved)
+    fun withoutHistoryDuplicates(
+        channel: UserName,
+        items: List<ChatItem>,
+    ): List<ChatItem> {
+        val handoff = historyHandoffs[channel] ?: return items
+        if (items.any { it.message is PrivMessage && it.message.timestamp > handoff.newestTimestamp }) {
+            historyHandoffs.remove(channel, handoff)
+        }
+        return items.filterNot { it.message.id in handoff.ids }
+    }
+
+    fun applyModerationMessage(message: ModerationMessage) {
+        // Its history copy is already applied, applying it again would add a second line or stack it twice
+        val isHistoryDuplicate = historyHandoffs[message.channel]?.ids?.contains(message.id) == true
+        if (!isHistoryDuplicate) {
+            messages[message.channel]?.update { current ->
+                when (message.action) {
+                    ModerationMessage.Action.Delete,
+                    ModerationMessage.Action.SharedDelete,
+                    -> current.replaceWithTimeout(message, scrollBackLength, messageProcessor::onMessageRemoved)
+
+                    else -> current.replaceOrAddModerationMessage(message, scrollBackLength, messageProcessor::onMessageRemoved)
+                }
             }
         }
+        chatNotificationRepository.applyModerationMessage(message)
     }
 
     fun broadcastToAllChannels(item: ChatItem) {
@@ -179,6 +214,17 @@ class ChatMessageRepository(
                 current.addAndLimit(item, scrollBackLength, messageProcessor::onMessageRemoved)
             }
         }
+    }
+
+    fun broadcastWhisperIfEnabled(item: ChatItem) {
+        if (!chatSettingsDataStore.current().showWhispersInline) return
+        val whisper = item.message as? WhisperMessage ?: return
+        val inlineWhisper =
+            item.copy(
+                message = messageProcessor.processInlineWhisper(whisper),
+                isMentionTab = false,
+            )
+        broadcastToAllChannels(inlineWhisper)
     }
 
     fun clearMessages(channel: UserName) {
@@ -208,20 +254,28 @@ class ChatMessageRepository(
 
     suspend fun reparseAllEmotesAndBadges() = withContext(dispatchersProvider.default) {
         messages.values
-            .map { flow ->
-                async {
-                    flow.update { items ->
-                        items.map { item ->
-                            // Unchanged messages keep their tag so mapping caches and compose keys survive
-                            when (val reparsed = messageProcessor.reparseEmotesAndBadges(item.message)) {
-                                item.message -> item
-                                else -> item.copy(tag = item.tag + 1, message = reparsed)
-                            }
-                        }
-                    }
-                }
-            }.awaitAll()
+            .map { flow -> async { flow.reparseEmotesAndBadges() } }
+            .awaitAll()
         chatNotificationRepository.reparseAll()
+        _reparseCount.update { it + 1 }
+    }
+
+    suspend fun reparseEmotesAndBadges(channel: UserName) = withContext(dispatchersProvider.default) {
+        messages[channel]?.reparseEmotesAndBadges()
+        chatNotificationRepository.reparseMentions(channel)
+        _reparseCount.update { it + 1 }
+    }
+
+    private suspend fun MutableStateFlow<List<ChatItem>>.reparseEmotesAndBadges() {
+        update { items ->
+            items.map { item ->
+                // Unchanged messages keep their tag so mapping caches and compose keys survive
+                when (val reparsed = messageProcessor.reparseEmotesAndBadges(item.message)) {
+                    item.message -> item
+                    else -> item.copy(tag = item.tag + 1, message = reparsed)
+                }
+            }
+        }
     }
 
     fun addSystemMessage(
@@ -240,11 +294,16 @@ class ChatMessageRepository(
         val reconnectedChannels = mutableSetOf<UserName>()
         channels.forEach { channel ->
             val flow = messages[channel] ?: return@forEach
-            val current = flow.value
-            flow.value =
+            var reconnected = false
+            flow.update { current ->
+                reconnected = false
                 current.addSystemMessage(type, scrollBackLength, messageProcessor::onMessageRemoved) {
-                    reconnectedChannels += channel
+                    reconnected = true
                 }
+            }
+            if (reconnected) {
+                reconnectedChannels += channel
+            }
         }
         return reconnectedChannels
     }
@@ -257,9 +316,17 @@ class ChatMessageRepository(
 
     fun createMessageFlows(channel: UserName) {
         messages.putIfAbsent(channel, MutableStateFlow(emptyList()))
+        updateChannelKeys()
     }
 
     fun removeMessageFlows(channel: UserName) {
         messages.remove(channel)
+        historyHandoffs.remove(channel)
+        updateChannelKeys()
     }
+
+    private class HistoryHandoff(
+        val ids: Set<String>,
+        val newestTimestamp: Long,
+    )
 }

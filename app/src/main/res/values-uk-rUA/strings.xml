@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <string name="app_name">TinyDankChat</string>
-    <string name="app_name_dank">TinyDankChat (Dank)</string>
+    <string name="app_name">TinyDank</string>
+    <string name="app_name_dank">TinyDank (Dank)</string>
     <string name="send_hint">Відправити повідомлення</string>
     <string name="login">Увійти</string>
     <string name="reload_emotes">Оновити смайли</string>
@@ -16,6 +16,7 @@
     <string name="error_dialog_copy">Копіювати</string>
     <string name="error_dialog_title">Помилка: %1$s</string>
     <string name="add_channel">Додати канал</string>
+    <string name="add_channels">Додати канали</string>
     <string name="manage_channels">Керування каналами</string>
     <string name="report_channel">Поскаржитись на канал</string>
     <string name="block_channel">Заблокувати канал</string>
@@ -25,6 +26,9 @@
     <string name="channel_blocked_message">Канал заблоковано</string>
     <string name="no_channels_added">Немає доданих каналів</string>
     <string name="no_channels_added_body">Додайте канал, щоб почати спілкування</string>
+    <string name="enable_channel_notifications">Увімкнути фонові сповіщення для %1$s</string>
+    <string name="disable_channel_notifications">Вимкнути фонові сповіщення для %1$s</string>
+    <string name="channel_background_notifications">Фонові сповіщення</string>
     <string name="confirm_logout_title">Підтвердити вихід</string>
     <string name="confirm_logout_message">Ви дійсно хочете вийти?</string>
     <string name="confirm_logout_question">Вийти?</string>
@@ -53,9 +57,6 @@
     <string name="hint_not_logged_int">Ви не ввійшли</string>
     <string name="hint_replying">Відповісти</string>
     <string name="hint_announcing">Надіслати оголошення</string>
-    <string name="notification_new_mentions">У Вас є нові згадки</string>
-    <string name="notification_mention">%1$s згадав Вас у #%2$s</string>
-    <string name="notification_notify_mention">Вас згадали у #%1$s</string>
     <string name="snackbar_login">Ви увійшли під ім\'ям %1$s</string>
     <string name="snackbar_login_failed">Помилка входу</string>
     <string name="snackbar_image_uploaded">Скопійовано: %1$s</string>
@@ -119,9 +120,9 @@
         <item quantity="other">%1$d тижнів</item>
     </plurals>
     <string name="duration_join_2">%1$s %2$s</string>
-    <string name="duration_join_3">%1$s %2$s %3$s</string>
     <string name="snackbar_paste">Вставити</string>
-    <string name="add_channel_hint">Ім\'я каналу</string>
+    <string name="add_channels_hint">Імена каналів</string>
+    <string name="add_channels_empty">Введіть хоча б одне ім\'я каналу</string>
     <string name="add_channel_already_added">Канал вже додано</string>
     <string name="emote_menu_tab_recent">Останні</string>
     <string name="backspace">Видалити</string>
@@ -131,6 +132,7 @@
     <string name="system_message_connected">Підключено</string>
     <string name="system_message_reconnected">Перепідключено</string>
     <string name="system_message_channel_non_existent">Цей канал не існує</string>
+    <string name="system_message_channel_join_failed">Не вдалося приєднатися до цього каналу</string>
     <string name="system_message_disconnected">Від\'єднано</string>
     <string name="system_message_history_unavailable_detailed">Сервіс нещодавніх повідомлень недоступний (Помилка %1$s)</string>
     <string name="system_message_history_unavailable">Сервіс нещодавніх повідомлень недоступний</string>
@@ -266,6 +268,7 @@
     </plurals>
     <string name="timed_out_message">&lt; Повідомлення видалено &gt;</string>
     <string name="multi_entry_header_regex">Регулярний вираз (regex)</string>
+    <string name="multi_entry_invalid_regex">Некоректний регулярний вираз</string>
     <string name="multi_entry_add_entry">Додати запис</string>
     <string name="login_expired">Сеанс входу закінчився! Спробуйте ввійти ще раз.</string>
     <string name="message_history_disclaimer_title">Примітка щодо історії повідомлень</string>
@@ -282,6 +285,7 @@
     <string name="replies_title">Тема для відповіді</string>
     <string name="whispers">Особисті повідомлення</string>
     <string name="notification_whisper_mention">%1$s надіслав особисте повідомлення</string>
+    <string name="notification_whisper_conversation_title">Особисте повідомлення від @%1$s</string>
     <string name="mentions">Згадки</string>
     <string name="confirm_channel_removal_title">Підтвердити видалення каналу</string>
     <string name="confirm_channel_removal_message">Ви дійсно хочете видалити канал?</string>
@@ -296,6 +300,7 @@
     <string name="user_popup_unblock">Розблокувати</string>
     <string name="user_popup_mention">Згадати користувача</string>
     <string name="user_popup_whisper">Відправити приватне повідомлення</string>
+    <string name="user_popup_ignore_highlights">Ігнорувати виділення</string>
     <string name="user_popup_created">Канал створений: %1$s</string>
     <string name="user_popup_following_since">Відстежується з %1$s</string>
     <string name="user_popup_not_following">Не відстежується</string>
@@ -308,6 +313,7 @@
     <string name="restart">Перезапустити</string>
     <string name="uploader_reset">Відновити значення за замовчуванням</string>
     <string name="uploader_url">Посилання</string>
+    <string name="uploader_url_unresolved">Не вдалося знайти цей домен</string>
     <string name="uploader_field">Поле форми</string>
     <string name="uploader_headers">Заголовки</string>
     <string name="uploader_image_link">Шаблон посилання на медіа</string>
@@ -331,9 +337,11 @@
     <string name="menu_exit_fullscreen">Вийти з повноекранного режиму</string>
     <string name="menu_hide_input">Сховати введення</string>
     <string name="menu_show_input">Показати введення</string>
+    <string name="menu_enable_tts">Увімкнути синтезатор мовлення</string>
+    <string name="menu_disable_tts">Вимкнути синтезатор мовлення</string>
     <string name="preference_fullscreen_button_opacity_title">Прозорість кнопок у повноекранному режимі</string>
     <string name="preference_fullscreen_button_opacity_summary">Кнопки, що відображаються у повноекранному режимі або коли введення приховано: %d%%</string>
-    <string name="preference_fullscreen_button_opacity_hint">Прозорість (1-100)</string>
+    <string name="preference_fullscreen_button_opacity_hint">Прозорість (1–100)</string>
     <string name="preference_fullscreen_button_opacity_validation">Має бути від 1 до 100</string>
     <string name="preference_fullscreen_button_opacity_custom">Власне</string>
     <string name="preference_require_fullscreen_exit_confirmation_title">Підтверджувати вихід з повноекранного режиму</string>
@@ -355,6 +363,7 @@
     <string name="input_action_mod_actions">Модерація каналу</string>
     <string name="input_action_fullscreen">На весь екран</string>
     <string name="input_action_hide_input">Сховати введення</string>
+    <string name="input_action_tts">Синтезатор мовлення</string>
     <string name="input_action_debug">Налагодження</string>
     <string name="input_action_configure">Налаштувати дії</string>
     <string name="input_action_hide_all">Сховати всі дії</string>
@@ -431,6 +440,7 @@
     <string name="tts_ignore_list_add_user">Додати користувача</string>
     <string name="tts_ignore_list_remove_user">Видалити користувача</string>
     <string name="tts_ignore_list_user_hint">Користувач</string>
+    <string name="tts_start_failed">Не вдалося запустити синтезатор мовлення</string>
     <string name="recent_upload_deletion_link">Посилання для видалення:
 %1$s</string>
     <string name="recent_uploads_clear">Очистити нещодавні завантаження</string>
@@ -458,6 +468,7 @@
     <string name="preference_roomstate_summary">Показувати інформацію про статус чату (наприклад, режиму \"Тільки для підписників\")</string>
     <string name="preference_always_show_pinned_message_title">Завжди показувати закріплене повідомлення</string>
     <string name="preference_always_show_pinned_message_summary">Вимикає автоматичне згортання банера закріпленого повідомлення</string>
+    <string name="preference_always_show_pinned_message_moderator_note">Twitch може показувати закріплені повідомлення лише модераторам</string>
     <string name="preference_show_stream_title_in_live_message_title">Показувати назву стріму в повідомленнях про вихід в ефір</string>
     <string name="preference_compact_channel_info_title">Компактна інформація про канал</string>
     <string name="preference_compact_channel_info_summary">Показувати режими чату та інформацію про стрім в одному рядку</string>
@@ -470,6 +481,10 @@
     <string name="preference_general_header">Загальні</string>
     <string name="preference_suggestions_header">Підказки</string>
     <string name="preference_messages_header">Повідомлення</string>
+    <string name="preference_message_tap_action_title">Дія при натисканні на повідомлення</string>
+    <string name="preference_message_tap_action_do_nothing">Нічого не робити</string>
+    <string name="preference_message_tap_action_open_user_card">Відкрити картку користувача</string>
+    <string name="preference_message_tap_action_open_message_options">Відкрити параметри повідомлення</string>
     <string name="preference_users_header">Користувачі</string>
     <string name="preference_emotes_badges_header">Емоції та значки</string>
     <string name="preference_suggestion_mode_title">Режим підказок</string>
@@ -522,7 +537,10 @@
     <string name="preference_display_group_title">Дисплей</string>
     <string name="preference_components_group_title">Елементи</string>
     <string name="preference_show_timed_out_messages_title">Показувати видалені повідомлення</string>
-    <string name="preference_animate_gifs_title">Анімовані смайли</string>
+    <string name="preference_show_whispers_inline_title">Показувати особисті повідомлення в чаті</string>
+    <string name="preference_show_whispers_inline_summary">Показує надіслані та отримані особисті повідомлення в усіх відкритих каналах</string>
+    <string name="preference_show_twitch_gifs_title">Показувати GIF з Twitch</string>
+    <string name="preference_animations_title">Анімувати емоції, значки та GIF</string>
     <string name="preference_line_separator_title">Відокремити повідомлення лініями</string>
     <string name="preference_keep_screen_on_title">Не вимикати екран</string>
     <string name="preference_font_size_title">Розмір шрифту</string>
@@ -567,6 +585,8 @@
     <string name="preference_tts_message_ignore_emote_title">Ігнорувати емоції</string>
     <string name="preference_tts_message_ignore_command_message">Ігнорує повідомлення, що починаються з префікса команди (!, $, %, +, -, ~)</string>
     <string name="preference_tts_message_ignore_command_title">Ігнорувати команди</string>
+    <string name="preference_tts_ignore_user_name_numbers_title">Ігнорувати цифри в іменах користувачів</string>
+    <string name="preference_tts_ignore_user_name_numbers_summary">Читає імена користувачів без цифр, наприклад john1990 як john</string>
     <string name="preference_tts_volume_title">Гучність</string>
     <string name="preference_tts_audio_ducking_title">Приглушення звуку</string>
     <string name="preference_tts_audio_ducking_summary">Зменшувати гучність інших додатків під час озвучення</string>
@@ -577,6 +597,17 @@
     <string name="preference_scrollback_length_title">Довжина прокручування повідомлень</string>
     <string name="preference_show_username_title">Показати ім\'я</string>
     <string name="preference_visible_badges_title">Видимі значки</string>
+    <string name="preference_dankchat_account_title">Обліковий запис DankChat</string>
+    <string name="dankchat_badge_automatic">Автоматично</string>
+    <string name="dankchat_badge_automatic_summary">Зараз: %1$s</string>
+    <string name="dankchat_badge_none">Без значка</string>
+    <string name="dankchat_badge_empty">У вас ще немає значка DankChat.</string>
+    <string name="dankchat_badge_logged_out">Увійдіть, щоб обрати значок DankChat</string>
+    <string name="dankchat_badge_unsupported">Ваш вхід не можна використати тут. Оберіть значок на dank.chat.</string>
+    <string name="dankchat_badge_load_failed">Не вдалося завантажити ваші значки DankChat</string>
+    <string name="dankchat_badge_save_failed">Не вдалося зберегти вибір значка</string>
+    <string name="dankchat_account_manage_title">Керувати обліковим записом на dank.chat</string>
+    <string name="dankchat_account_manage_summary">Завантажте свої дані або видаліть обліковий запис</string>
     <string name="preference_prefer_emote_suggestions_title">Надати перевагу підказкам смайлів</string>
     <string name="preference_prefer_emote_suggestions_summary">Надати перевагу підказкам смайлів над підказками імен користувачів</string>
     <string name="preference_user_long_click_title">Поведінка при довгому натиску на ім\'я користувача</string>
@@ -584,6 +615,10 @@
     <string name="preference_user_long_click_summary_off">Один натиск відкриває згадування, довгий натиск відкриває попап</string>
     <string name="preference_colorize_nicknames_title">Розфарбовувати псевдоніми</string>
     <string name="preference_colorize_nicknames_summary">Призначити випадковий колір користувачам без встановленого кольору</string>
+    <string name="preference_bold_username_mentions_title">Жирні псевдоніми</string>
+    <string name="preference_bold_username_mentions_summary">Робити згадані псевдоніми помітнішими</string>
+    <string name="preference_color_username_mentions_title">Розфарбовувати псевдоніми</string>
+    <string name="preference_color_username_mentions_summary">Використовувати колір користувача в Twitch для згаданих псевдонімів, якщо він відомий</string>
     <string name="preference_tts_force_english_title">Зробити англійську мовою синтезатора</string>
     <string name="preference_tts_force_english_summary">Використання англійської мови для синтезу мовлення замість мови системи</string>
     <string name="preference_visible_emotes_title">Видимі сторонні смайли</string>
@@ -592,12 +627,42 @@
     <string name="preference_show_chip_actions_summary">Показує кнопки для перемикання повноекранного режиму та плеєру і змінення режимів чату</string>
     <string name="preference_show_character_counter_title">Показувати лічильник символів</string>
     <string name="preference_show_character_counter_summary">Відображає кількість кодових точок у полі введення</string>
+    <string name="preference_show_send_wait_timer_title">Показувати відлік повільного режиму та тимчасового бану</string>
+    <string name="preference_show_send_wait_timer_summary">Показує, через скільки можна знову надсилати повідомлення</string>
     <string name="preference_show_clear_input_button_title">Показувати кнопку очищення введення</string>
     <string name="preference_show_send_button_title">Показувати кнопку надсилання</string>
     <string name="preference_input_group_title">Введення</string>
     <string name="preference_uploader_header">Сервіс завантаження медіа</string>
     <string name="preference_uploader_configure_title">Налаштувати сервіс завантаження медіа</string>
     <string name="preference_uploader_recent_uploads_title">Останні завантаження</string>
+    <string name="preference_export_header">Експорт</string>
+    <string name="backup_channels_title">Канали</string>
+    <string name="backup_export">Експортувати</string>
+    <string name="backup_import">Імпортувати</string>
+    <string name="backup_copy">Скопіювати в буфер обміну</string>
+    <string name="backup_paste">Вставити з буфера обміну</string>
+    <string name="backup_channels_description">Експортує всі канали разом із власними назвами. Під час імпорту додаються лише відсутні канали</string>
+    <string name="backup_settings_description">Експортує всі налаштування, крім даних входу</string>
+    <string name="backup_settings_uploader_note">Включає твою власну конфігурацію сервісу завантаження медіа</string>
+    <string name="import_data_confirmation">Замінити твої налаштування, канали, виділення та ігнорування імпортованими? Після цього програма перезапуститься.</string>
+    <string name="export_data_done">Налаштування експортовано</string>
+    <string name="export_data_failed">Не вдалося зберегти файл</string>
+    <string name="import_data_failed">Не вдалося прочитати цей файл</string>
+    <string name="import_data_newer_version">Цю резервну копію створено новішою версією DankChat</string>
+    <string name="clipboard_no_export">У буфері обміну немає експорту</string>
+    <plurals name="channels_exported">
+        <item quantity="one">Експортовано %1$d канал</item>
+        <item quantity="few">Експортовано %1$d канали</item>
+        <item quantity="many">Експортовано %1$d каналів</item>
+        <item quantity="other">Експортовано %1$d каналу</item>
+    </plurals>
+    <plurals name="channels_imported">
+        <item quantity="one">Додано %1$d канал</item>
+        <item quantity="few">Додано %1$d канали</item>
+        <item quantity="many">Додано %1$d каналів</item>
+        <item quantity="other">Додано %1$d каналу</item>
+    </plurals>
+    <string name="channels_import_none_new">Усі ці канали вже додано</string>
     <string name="preference_tts_user_ignore_list_title">Список ігнорованих користувачів</string>
     <string name="preference_tts_user_ignore_list_summary">Список користувачів, чиї повідомлення будуть ігноровані</string>
     <string name="preference_tools_header">Інструменти</string>
@@ -620,6 +685,8 @@
     <string name="preference_auto_disable_input_title">Вимикати поле вводу поки відсутнє з\'єднання з чатом</string>
     <string name="preference_repeated_sending_title">Увімкнути безперервне надсилання</string>
     <string name="preference_repeated_sending_summary">Вмикає безперервне надсилання повідомлень поки кнопка відправлення натиснута</string>
+    <string name="preference_emote_animation_clock_title">Синхронні анімації емоутів</string>
+    <string name="preference_emote_animation_clock_summary">Анімує емоути одночасно, щоб рідше перемальовувати екран</string>
     <string name="oauth_expired_title">Час входу минув!</string>
     <string name="oauth_expired_message">Термін дії вашого токена входу минув! Увійдіть ще раз.</string>
     <string name="oauth_expired_login_again">Увійти ще раз</string>
@@ -628,8 +695,8 @@
     <string name="preference_stream_live_messages_summary">Додає повідомлення в чат, коли канал починає або завершує ефір</string>
     <string name="preference_stream_extensions_title">Показувати розширення трансляції</string>
     <string name="preference_stream_extensions_summary">Показує накладання розширень у програвачі трансляції</string>
-    <string name="preference_retain_webview_title">Запобігти перезавантаженню трансляції</string>
-    <string name="preference_retain_webview_summary">Увімкнути експериментальне запобігання перезавантаженню трансляції після зміни орієнтації або повторного відкриття DankChat.</string>
+    <string name="preference_keep_stream_while_typing_title">Залишати трансляцію видимою під час набору</string>
+    <string name="preference_keep_stream_while_typing_summary">Показує трансляцію в портретній орієнтації, навіть якщо клавіатура чи меню смайлів залишають мало місця для чату</string>
     <string name="preference_show_changelogs">Показувати журнали змін після оновлення</string>
     <string name="preference_whats_new_header">Що нового</string>
     <string name="preference_custom_login_title">Користувацький логін</string>
@@ -697,6 +764,7 @@
     <string name="highlights_ignores_entry_elevated_messages">Піднесені повідомлення</string>
     <string name="highlights_ignores_entry_redemptions">Виділення куплені балами каналу</string>
     <string name="highlights_ignores_entry_replies">Відповіді</string>
+    <string name="highlights_ignores_entry_inline_whispers">Особисті повідомлення в чаті</string>
     <string name="highlights_ignores_entry_custom">Власне</string>
     <string name="highlights_messages_title">Створює сповіщення та виділяє повідомлення на основі певних шаблонів.</string>
     <string name="highlights_users_title">Створює сповіщення та виділяє повідомлення від певних користувачів.</string>
@@ -706,6 +774,8 @@
     <string name="ignores_users_title">Ігнорувати повідомлення від певних користувачів.</string>
     <string name="ignores_twitch_title">Керувати заблокованими користувачами Twitch.</string>
     <string name="preference_notification_whisper_title">Створити сповіщення для шепоту</string>
+    <string name="preference_notification_profile_pictures_title">Показувати аватари</string>
+    <string name="preference_notification_profile_pictures_summary">Використовувати аватари каналів і користувачів замість іконки DankChat</string>
     <string name="login_outdated_title">Увійдіть ще раз!</string>
     <string name="login_outdated_message">Ваш вхід застарів і не має доступу до деяких функцій. Увійдіть ще раз.</string>
     <string name="custom_user_display_title">Користувацьке відображення користувача</string>
@@ -726,6 +796,9 @@
     <string name="message_more_actions">Більше…</string>
     <string name="message_jump_to">Перейти до повідомлення</string>
     <string name="message_pin">Закріпити повідомлення</string>
+    <string name="message_warn">Попередити</string>
+    <string name="message_warn_reason">Причина</string>
+    <string name="message_warn_confirm">Попередити</string>
     <string name="message_not_in_history">Повідомлення більше немає в історії чату</string>
     <string name="message_history">Історія повідомлень</string>
     <string name="global_history_title">Глобальна історія</string>
@@ -924,6 +997,8 @@
     <string name="cmd_fail_ban">Не вдалося забанити користувача - %1$s</string>
     <string name="cmd_usage_unban">Використання: %1$s &lt;ім\'я користувача&gt; - Знімає бан з користувача.</string>
     <string name="cmd_fail_unban">Не вдалося розбанити користувача - %1$s</string>
+    <string name="cmd_usage_warn">Використання: %1$s &lt;ім\'я користувача&gt; &lt;причина&gt; - Попередити користувача. Причина обов\'язкова і буде показана цільовому користувачу та іншим модераторам.</string>
+    <string name="cmd_fail_warn">Не вдалося попередити користувача - %1$s</string>
     <string name="cmd_usage_timeout">Використання: %1$s &lt;ім\'я користувача&gt; [тривалість][одиниця часу] [причина] - Тимчасово заборонити користувачу писати в чат. Тривалість (необов\'язково, за замовчуванням: 10 хвилин) має бути додатним цілим числом; одиниця часу (необов\'язково, за замовчуванням: s) має бути s, m, h, d або w; максимальна тривалість — 2 тижні. Причина необов\'язкова і буде показана цільовому користувачу та іншим модераторам.</string>
     <string name="cmd_timeout_cannot_self">Не вдалося забанити користувача - Ви не можете дати тайм-аут самому собі.</string>
     <string name="cmd_timeout_cannot_broadcaster">Не вдалося забанити користувача - Ви не можете дати тайм-аут стрімеру.</string>
@@ -967,6 +1042,14 @@
     <string name="cmd_usage_shoutout">Використання: %1$s &lt;ім\'я користувача&gt; - Надсилає шаут-аут вказаному користувачу Twitch.</string>
     <string name="cmd_success_shoutout">Шаут-аут надіслано %1$s</string>
     <string name="cmd_fail_shoutout">Не вдалося надіслати шаут-аут - %1$s</string>
+    <string name="cmd_usage_set_title">Використання: %1$s &lt;назва трансляції&gt;</string>
+    <string name="cmd_success_set_title">Назву змінено на %1$s</string>
+    <string name="cmd_fail_set_title">Не вдалося змінити назву - %1$s</string>
+    <string name="cmd_usage_set_game">Використання: %1$s &lt;гра трансляції&gt;</string>
+    <string name="cmd_game_not_found">Гру не знайдено.</string>
+    <string name="cmd_success_set_game">Гру змінено на %1$s</string>
+    <string name="cmd_fail_search_game">Не вдалося виконати пошук гри - %1$s</string>
+    <string name="cmd_fail_set_game">Не вдалося змінити гру - %1$s</string>
     <string name="cmd_shield_activated">Режим щита активовано.</string>
     <string name="cmd_shield_deactivated">Режим щита деактивовано.</string>
     <string name="cmd_fail_shield">Не вдалося оновити режим щита - %1$s</string>
@@ -983,6 +1066,7 @@
     <string name="cmd_error_already_banned">%1$s вже забанений на цьому каналі.</string>
     <string name="cmd_error_cannot_perform">Ви не можете %1$s %2$s.</string>
     <string name="cmd_error_conflicting_ban">Відбулася конфліктуюча операція бану для цього користувача. Будь ласка, спробуйте знову.</string>
+    <string name="cmd_error_conflicting_warn">Відбулася конфліктуюча операція попередження для цього користувача. Будь ласка, спробуйте знову.</string>
     <string name="cmd_error_invalid_color">Колір має бути одним з підтримуваних Twitch кольорів (%1$s) або hex code (#000000), якщо у вас є Turbo або Prime.</string>
     <string name="cmd_error_commercial_not_streaming">Ви повинні вести пряму трансляцію для запуску реклами.</string>
     <string name="cmd_error_commercial_rate_limited">Потрібно дочекатися закінчення періоду очікування, перш ніж запускати наступну рекламу.</string>

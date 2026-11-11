@@ -23,6 +23,7 @@ import com.flxrs.dankchat.di.DispatchersProvider
 import com.flxrs.dankchat.utils.extensions.addAndLimit
 import com.flxrs.dankchat.utils.extensions.replaceOrAddHistoryModerationMessage
 import com.flxrs.dankchat.utils.extensions.runCatchingCancellable
+import com.flxrs.dankchat.utils.extensions.withoutShownModerationMessages
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.util.collections.ConcurrentSet
 import kotlinx.coroutines.flow.update
@@ -47,6 +48,10 @@ class RecentMessagesHandler(
         val userSuggestions: List<Pair<UserName, DisplayName>>,
     )
 
+    fun removeChannel(channel: UserName) {
+        loadedChannels -= channel
+    }
+
     @Suppress("LoopWithTooManyJumpStatements")
     suspend fun load(
         channel: UserName,
@@ -65,7 +70,6 @@ class RecentMessagesHandler(
                 return@withContext Result(emptyList(), emptyList())
             }
 
-        loadedChannels += channel
         val recentMessages = result.messages.orEmpty()
         val items = mutableListOf<ChatItem>()
         val messageIndex = HashMap<String, Message>(recentMessages.size)
@@ -73,7 +77,11 @@ class RecentMessagesHandler(
 
         measureTimeMillis {
             for (recentMessage in recentMessages) {
-                val parsedIrc = IrcMessage.parse(recentMessage)
+                val parsedIrc =
+                    runCatching { IrcMessage.parse(recentMessage) }.getOrElse {
+                        logger.warn(it) { "Skipping malformed history message for #$channel" }
+                        continue
+                    }
                 val isDeleted = parsedIrc.tags["rm-deleted"] == "1"
                 if (messageProcessor.isUserBlocked(parsedIrc.tags["user-id"]?.toUserId())) {
                     continue
@@ -129,8 +137,11 @@ class RecentMessagesHandler(
             }
         }.let { logger.info { "Parsing message history for #$channel took $it ms" } }
 
-        val messagesFlow = chatMessageRepository.getMessagesFlow(channel)
-        messagesFlow?.update { current ->
+        // A channel removed during the load stays unmarked, so adding it back loads its history
+        val messagesFlow = chatMessageRepository.getMessagesFlow(channel) ?: return@withContext Result(emptyList(), emptyList())
+        // Before merging, so a live copy processed in between is skipped instead of shown twice
+        chatMessageRepository.handOffHistory(channel, items)
+        messagesFlow.update { current ->
             val withIncompleteWarning =
                 when {
                     !isReconnect && recentMessages.isNotEmpty() && result.errorCode == RecentMessagesDto.ERROR_CHANNEL_NOT_JOINED -> {
@@ -142,9 +153,15 @@ class RecentMessagesHandler(
                     }
                 }
 
-            withIncompleteWarning.addAndLimit(items, chatMessageRepository.scrollBackLength, messageProcessor::onMessageRemoved, checkForDuplications = true)
+            withIncompleteWarning.addAndLimit(
+                items.withoutShownModerationMessages(current),
+                chatMessageRepository.scrollBackLength,
+                messageProcessor::onMessageRemoved,
+                checkForDuplications = true,
+            )
         }
         chatMessageRepository.decryptInBackground(channel, items)
+        loadedChannels += channel
 
         val mentionItems = items.filter { it.message.highlights.hasMention() }.toMentionTabItems()
         Result(mentionItems, userSuggestions)

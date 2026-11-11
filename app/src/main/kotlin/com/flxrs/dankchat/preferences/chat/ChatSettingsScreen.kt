@@ -162,7 +162,9 @@ private fun ChatSettingsScreen(
             HorizontalDivider(thickness = Dp.Hairline)
             MessagesCategory(
                 scrollbackLength = settings.scrollbackLength,
+                messageTapAction = settings.messageTapAction,
                 showTimedOutMessages = settings.showTimedOutMessages,
+                showWhispersInline = settings.showWhispersInline,
                 showTimestamps = settings.showTimestamps,
                 timestampFormat = settings.timestampFormat,
                 onInteraction = onInteraction,
@@ -172,11 +174,14 @@ private fun ChatSettingsScreen(
                 showUsernames = settings.showUsernames,
                 userLongClickBehavior = settings.userLongClickBehavior,
                 colorizeNicknames = settings.colorizeNicknames,
+                boldUsernameMentions = settings.boldUsernameMentions,
+                colorUsernameMentions = settings.colorUsernameMentions,
                 onNavToUserDisplays = onNavToUserDisplays,
                 onInteraction = onInteraction,
             )
             HorizontalDivider(thickness = Dp.Hairline)
             EmotesAndBadgesCategory(
+                showTwitchGifs = settings.showTwitchGifs,
                 animateGifs = settings.animateGifs,
                 visibleBadges = settings.visibleBadges,
                 visibleEmotes = settings.visibleEmotes,
@@ -273,7 +278,9 @@ private fun SuggestionsCategory(
 @Composable
 private fun MessagesCategory(
     scrollbackLength: Int,
+    messageTapAction: MessageTapAction,
     showTimedOutMessages: Boolean,
+    showWhispersInline: Boolean,
     showTimestamps: Boolean,
     timestampFormat: String,
     onInteraction: (ChatSettingsInteraction) -> Unit,
@@ -290,10 +297,35 @@ private fun MessagesCategory(
             displayValue = false,
             summary = sliderValue.roundToInt().toString(),
         )
+        val messageTapEntries =
+            listOf(
+                stringResource(R.string.preference_message_tap_action_do_nothing),
+                stringResource(R.string.message_reply),
+                stringResource(R.string.user_popup_mention),
+                stringResource(R.string.user_popup_whisper),
+                stringResource(R.string.preference_message_tap_action_open_user_card),
+                stringResource(R.string.preference_message_tap_action_open_message_options),
+                stringResource(R.string.message_copy),
+                stringResource(R.string.message_copy_full),
+            ).toImmutableList()
+        PreferenceListDialog(
+            title = stringResource(R.string.preference_message_tap_action_title),
+            summary = messageTapEntries[messageTapAction.ordinal],
+            values = MessageTapAction.entries.toImmutableList(),
+            entries = messageTapEntries,
+            selected = messageTapAction,
+            onChange = { onInteraction(ChatSettingsInteraction.MessageTapActionChange(it)) },
+        )
         SwitchPreferenceItem(
             title = stringResource(R.string.preference_show_timed_out_messages_title),
             isChecked = showTimedOutMessages,
             onClick = { onInteraction(ChatSettingsInteraction.ShowTimedOutMessages(it)) },
+        )
+        SwitchPreferenceItem(
+            title = stringResource(R.string.preference_show_whispers_inline_title),
+            summary = stringResource(R.string.preference_show_whispers_inline_summary),
+            isChecked = showWhispersInline,
+            onClick = { onInteraction(ChatSettingsInteraction.ShowWhispersInline(it)) },
         )
         SwitchPreferenceItem(
             title = stringResource(R.string.preference_timestamp_title),
@@ -317,6 +349,8 @@ private fun UsersCategory(
     showUsernames: Boolean,
     userLongClickBehavior: UserLongClickBehavior,
     colorizeNicknames: Boolean,
+    boldUsernameMentions: Boolean,
+    colorUsernameMentions: Boolean,
     onNavToUserDisplays: () -> Unit,
     onInteraction: (ChatSettingsInteraction) -> Unit,
 ) {
@@ -343,6 +377,18 @@ private fun UsersCategory(
             isChecked = colorizeNicknames,
             onClick = { onInteraction(ChatSettingsInteraction.ColorizeNicknames(it)) },
         )
+        SwitchPreferenceItem(
+            title = stringResource(R.string.preference_bold_username_mentions_title),
+            summary = stringResource(R.string.preference_bold_username_mentions_summary),
+            isChecked = boldUsernameMentions,
+            onClick = { onInteraction(ChatSettingsInteraction.BoldUsernameMentions(it)) },
+        )
+        SwitchPreferenceItem(
+            title = stringResource(R.string.preference_color_username_mentions_title),
+            summary = stringResource(R.string.preference_color_username_mentions_summary),
+            isChecked = colorUsernameMentions,
+            onClick = { onInteraction(ChatSettingsInteraction.ColorUsernameMentions(it)) },
+        )
         PreferenceItem(
             title = stringResource(R.string.custom_user_display_title),
             summary = stringResource(R.string.custom_user_display_summary),
@@ -354,6 +400,7 @@ private fun UsersCategory(
 
 @Composable
 private fun EmotesAndBadgesCategory(
+    showTwitchGifs: Boolean,
     animateGifs: Boolean,
     visibleBadges: ImmutableList<VisibleBadges>,
     visibleEmotes: ImmutableList<VisibleThirdPartyEmotes>,
@@ -361,7 +408,12 @@ private fun EmotesAndBadgesCategory(
 ) {
     PreferenceCategory(title = stringResource(R.string.preference_emotes_badges_header)) {
         SwitchPreferenceItem(
-            title = stringResource(R.string.preference_animate_gifs_title),
+            title = stringResource(R.string.preference_show_twitch_gifs_title),
+            isChecked = showTwitchGifs,
+            onClick = { onInteraction(ChatSettingsInteraction.ShowTwitchGifs(it)) },
+        )
+        SwitchPreferenceItem(
+            title = stringResource(R.string.preference_animations_title),
             isChecked = animateGifs,
             onClick = { onInteraction(ChatSettingsInteraction.AnimateGifs(it)) },
         )
@@ -512,7 +564,7 @@ private fun ChannelDataCategory(
         )
         SwitchPreferenceItem(
             title = stringResource(R.string.preference_always_show_pinned_message_title),
-            summary = stringResource(R.string.preference_always_show_pinned_message_summary),
+            summary = "${stringResource(R.string.preference_always_show_pinned_message_summary)}\n${stringResource(R.string.preference_always_show_pinned_message_moderator_note)}",
             isChecked = alwaysShowPinnedMessage,
             onClick = { onInteraction(ChatSettingsInteraction.AlwaysShowPinnedMessage(it)) },
         )

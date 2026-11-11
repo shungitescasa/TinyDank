@@ -4,6 +4,7 @@ import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import com.flxrs.dankchat.R
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -15,12 +16,31 @@ enum class InputAction {
     Fullscreen,
     Theater,
     HideInput,
+    TTS,
     Debug,
     Encryption
 }
 
 @Serializable
-enum class FabAnchor { BottomEnd, TopEnd, Free }
+enum class FabAnchor {
+    BottomEnd,
+    TopEnd,
+
+    @SerialName("FreeEdge")
+    Free,
+
+    /** Positioned within the space the cluster leaves free, converted to [Free] once the cluster is laid out. */
+    @SerialName("Free")
+    LegacyFree,
+}
+
+/** The settings that decide the colors of the app theme. */
+data class ThemeSettings(
+    val theme: ThemePreference = ThemePreference.System,
+    val trueDarkTheme: Boolean = false,
+    val accentColor: AccentColor? = null,
+    val paletteStyle: PaletteStylePreference = PaletteStylePreference.SystemDefault,
+)
 
 @Serializable
 data class AppearanceSettings(
@@ -37,13 +57,14 @@ data class AppearanceSettings(
     val showChips: Boolean = true,
     val showChangelogs: Boolean = true,
     val showCharacterCounter: Boolean = false,
-    val showClearInputButton: Boolean = true,
+    val showSendWaitTimer: Boolean = false,
+    val showClearInputButton: Boolean = false,
     val showSendButton: Boolean = true,
     val swipeNavigation: Boolean = true,
     val compactChannelInfo: Boolean = false,
     val fullscreenButtonOpacity: Float = 0.75f,
     val requireFullscreenExitConfirmation: Boolean = false,
-    val fabAnchor: FabAnchor = FabAnchor.BottomEnd,
+    val fabAnchor: FabAnchor = FabAnchor.TopEnd,
     val fabOffsetXFraction: Float = 0f,
     val fabOffsetYFraction: Float = 0f,
     val inputActions: List<InputAction> =
@@ -53,7 +74,10 @@ data class AppearanceSettings(
             InputAction.Search,
             InputAction.LastMessage,
         ),
-)
+) {
+    val themeSettings: ThemeSettings
+        get() = ThemeSettings(theme = theme, trueDarkTheme = trueDarkTheme, accentColor = accentColor, paletteStyle = paletteStyle)
+}
 
 enum class ThemePreference { System, Dark, Light }
 

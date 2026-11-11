@@ -56,23 +56,15 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.core.annotation.Single
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger("ChatEventProcessor")
 private const val MAX_LAST_MESSAGES = 5
-
-internal data class LastMessage(
-    val sent: String,
-    val typed: String,
-)
 
 @Single
 class ChatEventProcessor(
@@ -89,14 +81,21 @@ class ChatEventProcessor(
     private val channelRepository: ChannelRepository,
     private val chatSettingsDataStore: ChatSettingsDataStore,
     private val messageRateTracker: ChannelMessageRateTracker,
+    private val sendWaitRepository: SendWaitRepository,
     dispatchersProvider: DispatchersProvider,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + dispatchersProvider.default)
-    private val _lastMessages = MutableStateFlow<PersistentMap<UserName, PersistentList<LastMessage>>>(persistentMapOf())
-    internal val lastMessagesFlow: StateFlow<PersistentMap<UserName, PersistentList<LastMessage>>> = _lastMessages.asStateFlow()
-    private val knownRewards = ConcurrentHashMap<String, PubSubMessage.PointRedemption>()
+    private val _lastMessages = MutableStateFlow<PersistentMap<UserName, PersistentList<String>>>(persistentMapOf())
+    internal val lastMessagesFlow: StateFlow<PersistentMap<UserName, PersistentList<String>>> = _lastMessages.asStateFlow()
+
+    // Twitch only rejects a repeat of the previous chat message, commands and whispers in the input history don't count
+    private val lastSentMessages = ConcurrentHashMap<UserName, String>()
+    private val _lastReceivedWhisperUser = MutableStateFlow<UserName?>(null)
+    internal val lastReceivedWhisperUser: StateFlow<UserName?> = _lastReceivedWhisperUser.asStateFlow()
+    private val rewardMatcher = RewardMatcher()
     private val knownAutomodHeldIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
-    private val rewardMutex = Mutex()
+    private val joinRetries = ConcurrentHashMap<UserName, Int>()
+    private val channelsAwaitingRejoinHistory: MutableSet<UserName> = ConcurrentHashMap.newKeySet()
 
     init {
         scope.launch { collectReadConnectionEvents() }
@@ -105,35 +104,54 @@ class ChatEventProcessor(
         scope.launch { collectEventSubEvents() }
     }
 
-    fun getLastMessage(channel: UserName): String? = _lastMessages.value[channel]?.firstOrNull()?.sent
+    fun getLastMessage(channel: UserName): String? = lastSentMessages[channel]
 
-    fun getLastMessageForDisplay(channel: UserName?): String? = channel?.let { _lastMessages.value[it]?.firstOrNull()?.typed }
+    fun getLastMessageForDisplay(channel: UserName?): String? = channel?.let { _lastMessages.value[it]?.firstOrNull() }
 
     fun getRecentMessagesForDisplay(channel: UserName?): ImmutableList<String> = when (channel) {
         null -> persistentListOf()
-
-        else -> _lastMessages.value[channel]
-            ?.map { it.typed }
-            .orEmpty()
-            .toImmutableList()
+        else -> _lastMessages.value[channel].orEmpty().toImmutableList()
     }
 
     fun setLastMessage(
         channel: UserName,
         sent: String,
-        typed: String = sent,
+        typed: String,
+    ) {
+        lastSentMessages[channel] = sent
+        addMessageToHistory(channel, typed)
+    }
+
+    fun addMessageToHistory(
+        channel: UserName,
+        message: String,
     ) {
         _lastMessages.update { messages ->
             val updated = (messages[channel] ?: persistentListOf())
-                .removingAll { it.typed == typed }
-                .addingAt(0, LastMessage(sent = sent, typed = typed))
+                .removingAll { it == message }
+                .addingAt(0, message)
                 .let { it.subList(0, minOf(it.size, MAX_LAST_MESSAGES)).toPersistentList() }
             messages.putting(channel, updated)
         }
     }
 
-    fun removeLastMessages(channel: UserName) {
+    fun removeChannel(channel: UserName) {
         _lastMessages.update { it.removing(channel) }
+        lastSentMessages.remove(channel)
+        joinRetries.remove(channel)
+        channelsAwaitingRejoinHistory.remove(channel)
+    }
+
+    fun clearUserData() {
+        _lastMessages.value = persistentMapOf()
+        lastSentMessages.clear()
+        _lastReceivedWhisperUser.value = null
+    }
+
+    // History is loaded once the join completes, loading it earlier misses the messages sent in between
+    fun rejoinChannelWithHistory(channel: UserName) {
+        channelsAwaitingRejoinHistory += channel
+        chatConnector.joinIrcChannel(channel)
     }
 
     suspend fun loadRecentMessages(
@@ -148,9 +166,9 @@ class ChatEventProcessor(
     private suspend fun collectReadConnectionEvents() {
         chatConnector.readEvents.collect { event ->
             when (event) {
-                is ChatEvent.Connected -> handleConnected(event.isAnonymous)
+                is ChatEvent.Connected -> handleConnected(event.channel, event.isAnonymous)
                 is ChatEvent.Closed -> handleDisconnect()
-                is ChatEvent.ChannelNonExistent -> postSystemMessageAndReconnect(SystemMessageType.ChannelNonExistent(event.channel), setOf(event.channel))
+                is ChatEvent.JoinTimedOut -> handleJoinTimedOut(event)
                 is ChatEvent.LoginFailed -> postSystemMessageAndReconnect(SystemMessageType.LoginExpired)
                 is ChatEvent.Message -> onMessage(event.message)
                 is ChatEvent.Error -> handleDisconnect()
@@ -176,10 +194,12 @@ class ChatEventProcessor(
         }
     }
 
-    private suspend fun handlePubSubPinnedChatUpdate(pubSubMessage: PubSubMessage.PinnedChatUpdate) {
+    private fun handlePubSubPinnedChatUpdate(pubSubMessage: PubSubMessage.PinnedChatUpdate) {
         when {
             pubSubMessage.removed -> pinnedMessageRepository.clear(pubSubMessage.channelName)
-            else -> pinnedMessageRepository.fetch(pubSubMessage.channelName)
+
+            // Fetch off the collector so Helix calls never hold up redemptions and moderation events
+            else -> scope.launch { pinnedMessageRepository.fetch(pubSubMessage.channelName) }
         }
     }
 
@@ -201,33 +221,27 @@ class ChatEventProcessor(
             return
         }
 
-        // Automatic rewards (gigantified emotes, animated messages) are stored
-        // for cost lookup but don't create separate PointRedemptionMessages.
-        val isAutomaticReward = pubSubMessage.data.reward.rewardType != null
-        if (pubSubMessage.data.reward.requiresUserInput || isAutomaticReward) {
-            val id = pubSubMessage.data.reward.effectiveId
-            rewardMutex.withLock {
-                when {
-                    knownRewards.containsKey(id) -> {
-                        logger.debug { "Removing known reward $id" }
-                        knownRewards.remove(id)
-                    }
-
-                    else -> {
-                        logger.debug { "Received pubsub reward message with id $id" }
-                        knownRewards[id] = pubSubMessage
-                    }
-                }
+        val reward = pubSubMessage.data.reward
+        when {
+            reward.hasChatMessage -> {
+                val key = RewardKey(pubSubMessage.channelName, reward.effectiveId, pubSubMessage.data.user.id)
+                logger.debug { "Received pubsub reward message for $key" }
+                rewardMatcher.onRedemption(key, pubSubMessage)
             }
-        } else {
-            val message =
-                runCatching {
-                    messageProcessor.processReward(
-                        PointRedemptionMessage.parsePointReward(pubSubMessage.timestamp, pubSubMessage.data),
-                    )
-                }.getOrNull() ?: return
 
-            chatMessageRepository.addMessages(pubSubMessage.channelName, listOf(ChatItem(message)))
+            // Other automatic rewards don't get a separate line, it would only add clutter
+            reward.rewardType != null -> Unit
+
+            else -> {
+                val message =
+                    runCatching {
+                        messageProcessor.processReward(
+                            PointRedemptionMessage.parsePointReward(pubSubMessage.timestamp, pubSubMessage.data),
+                        )
+                    }.getOrNull() ?: return
+
+                chatMessageRepository.addMessages(pubSubMessage.channelName, listOf(ChatItem(message)))
+            }
         }
     }
 
@@ -367,9 +381,20 @@ class ChatEventProcessor(
 
             "CLEARMSG" -> handleClearMsg(msg)
 
-            "ROOMSTATE" -> channelRepository.handleRoomState(msg)
+            "ROOMSTATE" -> {
+                channelRepository.handleRoomState(msg)
+                msg.channelParam()?.let { channel ->
+                    sendWaitRepository.onRoomStateChanged(channel, channelRepository.getRoomState(channel)?.slowModeWaitTime)
+                }
+            }
 
-            "USERSTATE" -> userStateRepository.handleUserState(msg)
+            "USERSTATE" -> {
+                userStateRepository.handleUserState(msg)
+                msg.channelParam()?.let { channel ->
+                    val hasVip = msg.tags["badges"]?.split(',')?.any { it.startsWith("vip/") } == true
+                    sendWaitRepository.onHighRateLimitChanged(channel, hasVip || userStateRepository.isModeratorInChannel(channel))
+                }
+            }
 
             "GLOBALUSERSTATE" -> userStateRepository.handleGlobalUserState(msg)
 
@@ -387,33 +412,51 @@ class ChatEventProcessor(
     private suspend fun onWriterMessage(message: IrcMessage) {
         when (message.command) {
             "USERSTATE" -> userStateRepository.handleUserState(message)
+
             "GLOBALUSERSTATE" -> userStateRepository.handleGlobalUserState(message)
-            "NOTICE" -> handleMessage(message)
+
+            "NOTICE" -> {
+                // Notices that target no single channel arrive on both connections, the read connection shows them
+                val isGlobal = message.channelParam()?.let { usersRepository.isGlobalChannel(it) } == true
+                if (!isGlobal) {
+                    handleMessage(message)
+                }
+            }
         }
     }
 
     private fun handleDisconnect() {
         val state = ConnectionState.DISCONNECTED
+        joinRetries.clear()
         chatConnector.setAllConnectionStates(state)
         postSystemMessageAndReconnect(state.toSystemMessageType())
     }
 
-    private fun handleConnected(isAnonymous: Boolean) {
+    // Each channel counts as connected once its own join completed, so history reloads only after messages are flowing again
+    private fun handleConnected(
+        channel: UserName,
+        isAnonymous: Boolean,
+    ) {
+        joinRetries.remove(channel)
+        if (channel !in chatChannelProvider.channels.value.orEmpty()) {
+            return
+        }
+
         val state =
             when {
                 isAnonymous -> ConnectionState.CONNECTED_NOT_LOGGED_IN
                 else -> ConnectionState.CONNECTED
             }
-        val transitioning =
-            chatChannelProvider.channels.value
-                .orEmpty()
-                .filter { chatConnector.getConnectionState(it).value != state }
-                .toSet()
-
-        chatConnector.setAllConnectionStates(state)
-
-        if (transitioning.isNotEmpty()) {
-            postSystemMessageAndReconnect(state.toSystemMessageType(), transitioning)
+        val awaitsRejoinHistory = channelsAwaitingRejoinHistory.remove(channel)
+        val previous = chatConnector.setConnectionState(channel, state)
+        val reconnectedChannels =
+            when {
+                previous != state -> postSystemMessageAndReconnect(state.toSystemMessageType(), setOf(channel))
+                else -> emptySet()
+            }
+        // A channel that also reconnected in the meantime gets its history from the reconnect
+        if (awaitsRejoinHistory && channel !in reconnectedChannels) {
+            scope.launch { loadRecentMessages(channel, isReconnect = true) }
         }
     }
 
@@ -424,6 +467,12 @@ class ChatEventProcessor(
             }.getOrElse { return }
 
         chatMessageRepository.applyModerationMessage(parsed)
+
+        if (parsed.targetUser == authDataStore.userName) {
+            msg.tags["ban-duration"]?.toIntOrNull()?.let { duration ->
+                sendWaitRepository.startTimeout(parsed.channel, duration)
+            }
+        }
     }
 
     private fun handleClearMsg(msg: IrcMessage) {
@@ -458,7 +507,9 @@ class ChatEventProcessor(
         }
 
         val item = ChatItem(message, isMentionTab = true)
+        _lastReceivedWhisperUser.value = message.name
         chatNotificationRepository.addWhisper(item)
+        chatMessageRepository.broadcastWhisperIfEnabled(item)
         chatNotificationRepository.incrementMentionCount(WhisperMessage.WHISPER_CHANNEL, 1)
         chatNotificationRepository.emitMessages(listOf(item))
     }
@@ -466,11 +517,16 @@ class ChatEventProcessor(
     private suspend fun handleMessage(ircMessage: IrcMessage) {
         if (ircMessage.command == "NOTICE") {
             val msgId = ircMessage.tags["msg-id"]
-            if (msgId in NoticeMessage.ROOM_STATE_CHANGE_MSG_IDS) {
-                val channel = ircMessage.params[0].substring(1).toUserName()
-                if (chatConnector.connectedAndHasModerateTopic(channel)) {
-                    return
+            val channel = ircMessage.channelParam()
+            if (channel != null) {
+                when (val sendWaitNotice = parseSendWaitNotice(msgId, ircMessage.params.getOrNull(1).orEmpty())) {
+                    is SendWaitNotice.SlowMode -> sendWaitRepository.startSlowMode(channel, sendWaitNotice.durationSeconds)
+                    is SendWaitNotice.Timeout -> sendWaitRepository.startTimeout(channel, sendWaitNotice.durationSeconds)
+                    null -> Unit
                 }
+            }
+            if (msgId in NoticeMessage.ROOM_STATE_CHANGE_MSG_IDS && channel != null && chatConnector.connectedAndHasModerateTopic(channel)) {
+                return
             }
             if (msgId in AUTOMOD_NOTICE_MSG_IDS && chatConnector.connectedAndHasUserMessageTopic) {
                 return
@@ -482,7 +538,6 @@ class ChatEventProcessor(
         }
 
         val resolvedReward = resolveReward(ircMessage)
-        val additionalMessages = resolvedReward?.toStandaloneMessage().orEmpty()
 
         val message =
             runCatchingCancellable {
@@ -502,6 +557,14 @@ class ChatEventProcessor(
 
         trackUserState(message)
 
+        val channel =
+            when (message) {
+                is PrivMessage -> message.channel
+                is UserNoticeMessage -> message.channel
+                is NoticeMessage -> message.channel
+                else -> return
+            }
+
         val items =
             buildList {
                 if (message is UserNoticeMessage && message.childMessage != null) {
@@ -513,17 +576,12 @@ class ChatEventProcessor(
                         else -> ChatImportance.REGULAR
                     }
                 add(ChatItem(message, importance = importance))
-            }
+            }.let { chatMessageRepository.withoutHistoryDuplicates(channel, it) }
+        if (items.isEmpty()) {
+            return
+        }
 
-        val channel =
-            when (message) {
-                is PrivMessage -> message.channel
-                is UserNoticeMessage -> message.channel
-                is NoticeMessage -> message.channel
-                else -> return
-            }
-
-        chatMessageRepository.addMessages(channel, additionalMessages + items)
+        chatMessageRepository.addMessages(channel, items)
         chatNotificationRepository.emitMessages(items)
 
         val mentions =
@@ -552,34 +610,15 @@ class ChatEventProcessor(
             return null
         }
 
-        return rewardMutex.withLock {
-            knownRewards[rewardId]
-                ?.also {
-                    logger.debug { "Removing known reward $rewardId" }
-                    knownRewards.remove(rewardId)
-                }
-                ?: run {
-                    // Waiting is pointless without a connection and would stall the message pipeline
-                    when {
-                        !chatConnector.pubSubConnected -> null
-
-                        else -> {
-                            logger.debug { "Waiting for pubsub reward message with id $rewardId" }
-                            withTimeoutOrNull(PUBSUB_TIMEOUT) {
-                                chatConnector.pubSubEvents
-                                    .filterIsInstance<PubSubMessage.PointRedemption>()
-                                    .first { it.data.reward.id == rewardId }
-                            }?.also { knownRewards[rewardId] = it }
-                        }
-                    }
-                }
-        }
+        val channel = ircMessage.channelParam() ?: return null
+        return awaitReward(RewardKey(channel, rewardId, ircMessage.tags["user-id"]?.toUserId()))
     }
 
-    private suspend fun PubSubMessage.PointRedemption.toStandaloneMessage(): List<ChatItem> {
-        if (data.reward.requiresUserInput) return emptyList()
-        val processed = messageProcessor.processReward(PointRedemptionMessage.parsePointReward(timestamp, data))
-        return listOfNotNull(processed?.let(::ChatItem))
+    private suspend fun awaitReward(key: RewardKey): PubSubMessage.PointRedemption? = when {
+        // Waiting is pointless without a connection and would stall the message pipeline
+        !chatConnector.pubSubConnected -> rewardMatcher.take(key)
+
+        else -> rewardMatcher.await(key, PUBSUB_TIMEOUT)
     }
 
     private fun attachRewardInfo(
@@ -601,20 +640,7 @@ class ChatEventProcessor(
         val msgId = message.tags["msg-id"] ?: return message
         if (msgId != "gigantified-emote-message" && msgId != "animated-message") return message
 
-        val reward = rewardMutex.withLock {
-            knownRewards.remove(msgId)
-        } ?: when {
-            // Waiting is pointless without a connection and would stall the message pipeline
-            !chatConnector.pubSubConnected -> null
-
-            else ->
-                withTimeoutOrNull(PUBSUB_TIMEOUT) {
-                    chatConnector.pubSubEvents
-                        .filterIsInstance<PubSubMessage.PointRedemption>()
-                        .first { it.data.reward.effectiveId == msgId }
-                }
-        }
-
+        val reward = awaitReward(RewardKey(message.channel, msgId, message.userId))
         val rewardData = reward?.data?.reward ?: return message
         return message.copy(
             rewardCost = rewardData.effectiveCost,
@@ -633,13 +659,20 @@ class ChatEventProcessor(
         }
 
         if (message.name == authDataStore.userName) {
-            val previousLastMessage = getLastMessage(message.channel).orEmpty()
-            val lastMessageWasCommand = previousLastMessage.startsWith('.') || previousLastMessage.startsWith('/')
-            if (!lastMessageWasCommand && previousLastMessage.withoutInvisibleChar != message.originalMessage.withoutInvisibleChar) {
+            val userState = userStateRepository.userState.value
+            val hasVip = message.badges.any { badge -> badge.badgeTag?.startsWith("vip") == true }
+            sendWaitRepository.onOwnMessage(
+                channel = message.channel,
+                slowModeSeconds = channelRepository.getRoomState(message.channel)?.slowModeWaitTime,
+                hasHighRateLimit = message.channel in userState.moderationChannels || message.channel in userState.vipChannels || hasVip,
+            )
+            val previousSentMessage = getLastMessage(message.channel).orEmpty()
+            val previousTypedMessage = getLastMessageForDisplay(message.channel).orEmpty()
+            val lastMessageWasCommand = previousTypedMessage.startsWith('.') || previousTypedMessage.startsWith('/')
+            if (!lastMessageWasCommand && previousSentMessage.withoutInvisibleChar != message.originalMessage.withoutInvisibleChar) {
                 setLastMessage(channel = message.channel, sent = message.originalMessage, typed = message.originalMessage.withoutInvisibleChar)
             }
 
-            val hasVip = message.badges.any { badge -> badge.badgeTag?.startsWith("vip") == true }
             when {
                 hasVip -> userStateRepository.addVipChannel(message.channel)
                 else -> userStateRepository.removeVipChannel(message.channel)
@@ -658,13 +691,33 @@ class ChatEventProcessor(
         }
     }
 
+    private fun handleJoinTimedOut(event: ChatEvent.JoinTimedOut) = scope.launch {
+        // Slow connections can exceed the join timeout, so logged in users confirm the channel is gone first
+        if (!event.isAnonymous && !channelRepository.isChannelMissing(event.channel)) {
+            val attempt = joinRetries.merge(event.channel, 1, Int::plus) ?: 1
+            when {
+                attempt <= MAX_JOIN_RETRIES -> {
+                    logger.info { "Join of #${event.channel} timed out, but the channel exists, retrying ($attempt/$MAX_JOIN_RETRIES)" }
+                    chatConnector.rejoinIrcChannel(event.channel)
+                }
+
+                else -> {
+                    logger.info { "Join of #${event.channel} timed out, but the channel exists, giving up after $MAX_JOIN_RETRIES retries" }
+                    chatMessageRepository.addSystemMessage(event.channel, SystemMessageType.ChannelJoinFailed)
+                }
+            }
+            return@launch
+        }
+        postSystemMessageAndReconnect(SystemMessageType.ChannelNonExistent(event.channel), setOf(event.channel))
+    }
+
     private fun postSystemMessageAndReconnect(
         type: SystemMessageType,
         channels: Set<UserName> =
             chatChannelProvider.channels.value
                 .orEmpty()
                 .toSet(),
-    ) {
+    ): Set<UserName> {
         val reconnectedChannels = chatMessageRepository.addSystemMessageToChannels(type, channels)
         reconnectedChannels.forEach { channel ->
             scope.launch {
@@ -672,9 +725,8 @@ class ChatEventProcessor(
                     loadRecentMessages(channel, isReconnect = true)
                 }
             }
-            // PubSub doesn't replay missed pin events, so re-sync after reconnects
-            scope.launch { pinnedMessageRepository.fetch(channel) }
         }
+        return reconnectedChannels
     }
 
     private fun ConnectionState.toSystemMessageType(): SystemMessageType = when (this) {
@@ -711,7 +763,10 @@ class ChatEventProcessor(
     }
 
     companion object {
-        private const val PUBSUB_TIMEOUT = 3000L
+        private val PUBSUB_TIMEOUT = 3.seconds
+        private const val MAX_JOIN_RETRIES = 3
         private val AUTOMOD_NOTICE_MSG_IDS = setOf("msg_rejected", "msg_rejected_mandatory")
     }
 }
+
+private fun IrcMessage.channelParam(): UserName? = params.firstOrNull()?.removePrefix("#")?.toUserName()

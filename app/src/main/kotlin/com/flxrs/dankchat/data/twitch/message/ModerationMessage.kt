@@ -13,9 +13,6 @@ import com.flxrs.dankchat.data.twitch.pubsub.dto.moderation.ModerationActionType
 import com.flxrs.dankchat.utils.DateTimeUtils
 import com.flxrs.dankchat.utils.TextResource
 import kotlinx.collections.immutable.persistentListOf
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toInstant
-import kotlinx.datetime.toLocalDateTime
 import java.util.UUID
 import kotlin.time.Instant
 
@@ -120,7 +117,7 @@ data class ModerationMessage(
     private val hasReason get() = !reason.isNullOrBlank()
     private val quotedTermsOrBlank get() = reason.takeUnless { it.isNullOrBlank() } ?: "terms"
 
-    private fun trimmedMessage(showDeletedMessage: Boolean): String? {
+    fun trimmedMessage(showDeletedMessage: Boolean): String? {
         if (!showDeletedMessage) return null
         val fullReason = reason.orEmpty()
         return when {
@@ -406,12 +403,9 @@ data class ModerationMessage(
         private fun joinDurationParts(
             parts: List<TextResource>,
             fallback: () -> TextResource,
-        ): TextResource = when (parts.size) {
-            0 -> fallback()
-            1 -> parts[0]
-            2 -> TextResource.Res(R.string.duration_join_2, persistentListOf(parts[0], parts[1]))
-            else -> TextResource.Res(R.string.duration_join_3, persistentListOf(parts[0], parts[1], parts[2]))
-        }
+        ): TextResource = parts.reduceOrNull { joined, part ->
+            TextResource.Res(R.string.duration_join_2, persistentListOf(joined, part))
+        } ?: fallback()
 
         fun parseClearChat(message: IrcMessage): ModerationMessage = with(message) {
             val channel = params[0].substring(1)
@@ -444,7 +438,7 @@ data class ModerationMessage(
             val targetMsgId = tags["target-msg-id"]
             val reason = params.getOrNull(1)
             val ts = tags["tmi-sent-ts"]?.toLongOrNull() ?: System.currentTimeMillis()
-            val id = tags["id"] ?: "clearmsg-$ts-$channel-${target.orEmpty()}"
+            val id = tags["id"] ?: "clearmsg-$ts-$channel-${targetMsgId ?: target.orEmpty()}"
 
             return ModerationMessage(
                 timestamp = ts,
@@ -468,11 +462,10 @@ data class ModerationMessage(
             val targetUser = parseTargetUser(data)
             val targetMsgId = parseTargetMsgId(data)
             val reason = parseReason(data)
-            val timeZone = TimeZone.currentSystemDefault()
             val action = data.moderationAction.toAction(seconds)
 
             return ModerationMessage(
-                timestamp = timestamp.toLocalDateTime(timeZone).toInstant(timeZone).toEpochMilliseconds(),
+                timestamp = timestamp.toEpochMilliseconds(),
                 id = data.msgId ?: UUID.randomUUID().toString(),
                 channel = channel,
                 action = action,
@@ -493,15 +486,13 @@ data class ModerationMessage(
             channel: UserName,
             data: ChannelModerateDto,
         ): ModerationMessage {
-            val timeZone = TimeZone.currentSystemDefault()
-            val timestampMillis = timestamp.toLocalDateTime(timeZone).toInstant(timeZone).toEpochMilliseconds()
             val userPair = parseTargetUser(data)
             val targetMsgId = parseTargetMsgId(data)
             val reason = parseReason(data)
             val action = data.action.toAction(timestamp, data)
 
             return ModerationMessage(
-                timestamp = timestampMillis,
+                timestamp = timestamp.toEpochMilliseconds(),
                 id = id,
                 channel = channel,
                 action = action,

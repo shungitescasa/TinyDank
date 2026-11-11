@@ -19,6 +19,7 @@ import kotlinx.coroutines.withContext
 import org.koin.core.annotation.Single
 
 private val logger = KotlinLogging.logger("ChatMessageSender")
+private val LINE_BREAK_REGEX = "[\\r\\n]+".toRegex()
 
 @Single
 class ChatMessageSender(
@@ -39,14 +40,16 @@ class ChatMessageSender(
         forceIrc: Boolean = false,
         encrypt: Boolean = false,
     ) {
-        if (message.isBlank()) {
+        // A line break ends an IRC command, so pasted multi-line text would otherwise run as raw commands
+        val singleLine = message.replace(LINE_BREAK_REGEX, " ")
+        if (singleLine.isBlank()) {
             return
         }
 
         val protocol = developerSettingsDataStore.current().chatSendProtocol
         when {
-            forceIrc || protocol == ChatSendProtocol.IRC -> sendViaIrc(channel, message, replyId, encrypt)
-            else -> sendViaHelix(channel, message, replyId, encrypt)
+            forceIrc || protocol == ChatSendProtocol.IRC -> sendViaIrc(channel, singleLine, replyId, encrypt)
+            else -> sendViaHelix(channel, singleLine, replyId, encrypt)
         }
     }
 
@@ -61,7 +64,11 @@ class ChatMessageSender(
         val messageWithSuffix = prepareWireMessage(channel, trimmedMessage, encrypt)
 
         chatEventProcessor.setLastMessage(channel, sent = messageWithSuffix, typed = trimmedMessage)
-        chatConnector.sendRaw("${replyIdOrBlank}PRIVMSG #$channel :$messageWithSuffix")
+        val sent = chatConnector.sendRaw("${replyIdOrBlank}PRIVMSG #$channel :$messageWithSuffix")
+        if (!sent) {
+            postError(channel, SystemMessageType.SendNotDelivered)
+            return
+        }
         chatMessageRepository.incrementSentMessageCount(ChatSendProtocol.IRC)
     }
 
@@ -72,6 +79,8 @@ class ChatMessageSender(
         encrypt: Boolean,
     ) {
         val trimmedMessage = message.trimEnd()
+        // The input is already cleared, a message that fails stays available in the history
+        chatEventProcessor.addMessageToHistory(channel, trimmedMessage)
         val senderId =
             authDataStore.userIdString ?: run {
                 postError(channel, SystemMessageType.SendNotLoggedIn)
@@ -136,16 +145,13 @@ class ChatMessageSender(
         }
     }
 
-    // When the user repeats the same typed message, compound the bypass on the previously-sent
-    // wire so each successive send is unique within Twitch's duplicate-detection window.
     private fun bypassDuplicateIfNeeded(
         channel: UserName,
         trimmedMessage: String,
     ): String {
-        val previousTypedMessage = chatEventProcessor.getLastMessageForDisplay(channel)
         val previousSentMessage = chatEventProcessor.getLastMessage(channel)
-        return when {
-            previousTypedMessage == trimmedMessage && previousSentMessage != null -> applyAntiDuplicate(previousSentMessage)
+        return when (previousSentMessage) {
+            trimmedMessage -> applyAntiDuplicate(trimmedMessage)
             else -> trimmedMessage
         }
     }

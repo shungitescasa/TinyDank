@@ -71,6 +71,13 @@ class DeveloperSettingsViewModel(
                     developerSettingsDataStore.update { it.copy(eventSubDebugOutput = interaction.value) }
                 }
 
+                is DeveloperSettingsInteraction.EmoteAnimationClock -> {
+                    developerSettingsDataStore.update { it.copy(emoteAnimationClock = interaction.value) }
+                    if (initial.emoteAnimationClock != interaction.value) {
+                        _events.emit(DeveloperSettingsEvent.RestartRequired)
+                    }
+                }
+
                 is DeveloperSettingsInteraction.ChatSendProtocolChanged -> {
                     developerSettingsDataStore.update { it.copy(chatSendProtocol = interaction.protocol) }
                 }
@@ -93,7 +100,6 @@ class DeveloperSettingsViewModel(
                     onboardingDataStore.update {
                         it.copy(
                             featureTourVersion = 0,
-                            featureTourStep = 0,
                             hasShownAddChannelHint = false,
                             hasShownToolbarHint = false,
                         )

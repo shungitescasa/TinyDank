@@ -1,19 +1,25 @@
 package com.flxrs.dankchat.ui.chat.messages.common
 
 import android.content.Context
+import android.content.Intent
+import android.view.WindowManager
+import androidx.activity.result.ActivityResultLauncher
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -21,23 +27,25 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import com.flxrs.dankchat.ui.chat.BadgeUi
 import com.flxrs.dankchat.ui.chat.EmoteUi
+import com.flxrs.dankchat.ui.chat.emote.EmoteAnimationCoordinator
 import com.flxrs.dankchat.ui.chat.emote.EmoteSheetData
 import com.flxrs.dankchat.ui.chat.emote.LocalEmoteAnimationCoordinator
-import com.flxrs.dankchat.ui.chat.emote.StackedEmote
+import com.flxrs.dankchat.ui.chat.emote.cacheKey
 import com.flxrs.dankchat.ui.chat.emote.emoteBaseHeight
-import com.flxrs.dankchat.ui.chat.emote.singleEmoteCacheKey
-import com.flxrs.dankchat.ui.chat.emote.stackedCacheKey
 import com.flxrs.dankchat.ui.chat.emote.toEmoteSheetData
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.collections.immutable.ImmutableList
-import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.toImmutableMap
+import kotlin.math.ceil
 
 private val logger = KotlinLogging.logger("MessageTextRenderer")
 
@@ -47,10 +55,11 @@ fun MessageTextWithInlineContent(
     badges: ImmutableList<BadgeUi>,
     emotes: ImmutableList<EmoteUi>,
     fontSize: Float,
-    animateGifs: Boolean,
     onTextClick: (Int) -> Unit,
     onEmoteClick: (List<EmoteSheetData>) -> Unit,
     modifier: Modifier = Modifier,
+    onBackgroundClick: (() -> Unit)? = null,
+    asciiArtStart: Int? = null,
     onTextLongClick: ((Int) -> Unit)? = null,
     interactionSource: MutableInteractionSource? = null,
     maxLines: Int = Int.MAX_VALUE,
@@ -60,58 +69,32 @@ fun MessageTextWithInlineContent(
     val density = LocalDensity.current
 
     val badgeSize = emoteBaseHeight(fontSize)
-    val inlineContentProviders: ImmutableMap<String, @Composable () -> Unit> =
-        remember(badges, emotes, fontSize, animateGifs) {
-            buildMap<String, @Composable () -> Unit> {
-                badges.forEach { badge ->
-                    put("BADGE_${badge.position}") {
-                        // BasicText composes inline children positionally, so an explicit key
-                        // prevents a slot reused for a different item from inheriting its state
-                        key(badge.position, badge.url) {
-                            BadgeInlineContent(badge = badge, size = badgeSize)
-                        }
-                    }
-                }
-
-                emotes.forEach { emote ->
-                    put("EMOTE_${emote.position}") {
-                        key(emote.position, emote.urls) {
-                            StackedEmote(
-                                emote = emote,
-                                fontSize = fontSize,
-                                emoteCoordinator = emoteCoordinator,
-                                animateGifs = animateGifs,
-                                modifier = Modifier,
-                                onClick = { onEmoteClick(emote.emotes.map { it.toEmoteSheetData() }) },
-                            )
-                        }
-                    }
-                }
-            }.toImmutableMap()
-        }
-
     val baseHeightPx = with(density) { badgeSize.toPx().toInt() }
-    var dimensionRefresh by remember(badges, emotes, fontSize) { mutableIntStateOf(0) }
-    // Unloaded emotes get the loading placeholder size as an estimate so the map is always
-    // complete and rows never fall back to subcompose measuring
+    val inlineImages = rememberInlineImages(badges, emotes, fontSize)
+    val onInlineEmoteClick = { emote: EmoteUi -> onEmoteClick(emote.emotes.map { it.toEmoteSheetData() }) }
+    var dimensionRefresh by remember(badges, emotes, baseHeightPx) { mutableIntStateOf(0) }
+    // Unloaded emotes get the loading placeholder size as an estimate, so every emote has a placeholder
     val (knownDimensions, hasEstimatedDimensions) =
-        remember(badges, emotes, fontSize, emoteCoordinator, dimensionRefresh) {
+        remember(badges, emotes, baseHeightPx, emoteCoordinator, dimensionRefresh) {
             var hasEstimates = false
             val dimensions = buildMap {
                 badges.forEach { badge ->
-                    put("BADGE_${badge.position}", EmoteDimensions("BADGE_${badge.position}", baseHeightPx, baseHeightPx))
+                    val id = badgeInlineId(badge)
+                    put(id, EmoteDimensions(id, baseHeightPx, baseHeightPx))
                 }
 
                 emotes.forEach { emote ->
-                    val id = "EMOTE_${emote.position}"
-                    val dims = emoteCoordinator.getDimensions(emote.dimensionKey(baseHeightPx))
+                    val id = emoteInlineId(emote)
+                    val key = emote.cacheKey(baseHeightPx)
+                    val dims = emoteCoordinator.getDimensions(key)
                     when {
                         dims != null -> put(id, EmoteDimensions(id, dims.first, dims.second))
 
                         else -> {
                             hasEstimates = true
                             val estimate = baseHeightPx * (emote.emotes.firstOrNull()?.scale ?: 1)
-                            put(id, EmoteDimensions(id, estimate, estimate))
+                            val partial = emoteCoordinator.getPartialDimensions(key)
+                            put(id, EmoteDimensions(id, partial?.first ?: estimate, partial?.second ?: estimate))
                         }
                     }
                 }
@@ -120,47 +103,174 @@ fun MessageTextWithInlineContent(
         }
 
     // Rows composed before their emotes loaded wait for the dimensions to land, then upgrade
-    // from the estimated placeholder sizes
+    // from the estimated placeholder sizes. Partial stacks keep the row waiting for the complete stack.
     if (hasEstimatedDimensions) {
-        LaunchedEffect(badges, emotes, fontSize) {
-            emoteCoordinator.dimensionUpdates.collect {
-                val allKnown = emotes.all { emote -> emoteCoordinator.getDimensions(emote.dimensionKey(baseHeightPx)) != null }
-                if (allKnown) {
+        val currentDimensions by rememberUpdatedState(knownDimensions)
+        LaunchedEffect(badges, emotes, baseHeightPx) {
+            val keys = emotes.map { it.cacheKey(baseHeightPx) }.toSet()
+            emoteCoordinator.dimensionChanges(keys).collect {
+                val resolved = emotes.map { emote -> emote to emoteCoordinator.resolvedDimensions(emote, baseHeightPx) }
+                val allResolved = resolved.all { (_, dims) -> dims != null }
+                val changed = resolved.any { (emote, dims) ->
+                    val current = currentDimensions[emoteInlineId(emote)]
+                    dims != null && (current == null || dims.first != current.widthPx || dims.second != current.heightPx)
+                }
+                if (allResolved && changed) {
                     dimensionRefresh++
                 }
             }
         }
     }
 
-    TextWithMeasuredInlineContent(
-        text = annotatedString,
-        inlineContentProviders = inlineContentProviders,
-        style = TextStyle(fontSize = fontSize.sp),
-        knownDimensions = knownDimensions,
-        maxLines = maxLines,
-        overflow = overflow,
-        modifier = modifier.fillMaxWidth(),
-        interactionSource = interactionSource,
-        onTextClick = onTextClick,
-        onTextLongClick = onTextLongClick,
-    )
+    val style = TextStyle(fontSize = fontSize.sp)
+    when {
+        // Line limited previews keep the regular layout, a scaled partial art block would be meaningless
+        asciiArtStart != null && maxLines == Int.MAX_VALUE -> {
+            val (prefix, art) = remember(annotatedString, asciiArtStart) {
+                annotatedString.subSequence(0, asciiArtStart) to annotatedString.subSequence(asciiArtStart, annotatedString.length)
+            }
+            // Offsets map back to the full string, -1 marks a press outside the text
+            val toFullOffset = { offset: Int ->
+                when {
+                    offset < 0 -> offset
+                    else -> offset + asciiArtStart
+                }
+            }
+            Column(modifier = modifier.fillMaxWidth()) {
+                if (prefix.isNotEmpty()) {
+                    TextWithMeasuredInlineContent(
+                        text = prefix,
+                        inlineImages = inlineImages,
+                        onEmoteClick = onInlineEmoteClick,
+                        style = style,
+                        knownDimensions = knownDimensions,
+                        modifier = Modifier.fillMaxWidth(),
+                        interactionSource = interactionSource,
+                        onBackgroundClick = onBackgroundClick,
+                        onTextClick = onTextClick,
+                        onTextLongClick = onTextLongClick,
+                    )
+                }
+                TextWithMeasuredInlineContent(
+                    text = art,
+                    inlineImages = inlineImages,
+                    onEmoteClick = onInlineEmoteClick,
+                    style = style,
+                    knownDimensions = knownDimensions,
+                    modifier = Modifier.asciiArtLayout(fontSize),
+                    interactionSource = interactionSource,
+                    onBackgroundClick = onBackgroundClick,
+                    onTextClick = { onTextClick(toFullOffset(it)) },
+                    onTextLongClick = onTextLongClick?.let { onLongClick -> { onLongClick(toFullOffset(it)) } },
+                )
+            }
+        }
+
+        else -> {
+            TextWithMeasuredInlineContent(
+                text = annotatedString,
+                inlineImages = inlineImages,
+                onEmoteClick = onInlineEmoteClick,
+                style = style,
+                knownDimensions = knownDimensions,
+                maxLines = maxLines,
+                overflow = overflow,
+                modifier = modifier.fillMaxWidth(),
+                interactionSource = interactionSource,
+                onBackgroundClick = onBackgroundClick,
+                onTextClick = onTextClick,
+                onTextLongClick = onTextLongClick,
+            )
+        }
+    }
 }
 
-private fun EmoteUi.dimensionKey(baseHeightPx: Int): String = when {
-    urls.size == 1 -> singleEmoteCacheKey(urls.first(), baseHeightPx)
-    else -> stackedCacheKey(baseHeightPx)
+// Twitch web chat wraps art in a 300px column, which matches 300dp at the default 14sp font
+private const val ASCII_ART_WIDTH_EM = 300f / 14f
+
+/**
+ * Lays out ASCII art at the width it was drawn for, relative to the font size, so its lines wrap like on Twitch.
+ * Narrower chats shrink the art uniformly instead of re-wrapping it.
+ */
+private fun Modifier.asciiArtLayout(fontSize: Float): Modifier = layout { measurable, constraints ->
+    val artWidth = (fontSize * ASCII_ART_WIDTH_EM).sp.roundToPx()
+    val placeable = measurable.measure(Constraints(minWidth = artWidth, maxWidth = artWidth))
+    when {
+        constraints.hasBoundedWidth && constraints.maxWidth < artWidth -> {
+            val scale = constraints.maxWidth.toFloat() / artWidth
+            val height = constraints.constrainHeight(ceil(placeable.height * scale).toInt())
+            layout(constraints.maxWidth, height) {
+                placeable.placeWithLayer(0, 0) {
+                    scaleX = scale
+                    scaleY = scale
+                    transformOrigin = TransformOrigin(0f, 0f)
+                }
+            }
+        }
+
+        else -> {
+            layout(constraints.constrainWidth(artWidth), constraints.constrainHeight(placeable.height)) {
+                placeable.place(0, 0)
+            }
+        }
+    }
 }
 
+private fun EmoteAnimationCoordinator.resolvedDimensions(
+    emote: EmoteUi,
+    baseHeightPx: Int,
+): Pair<Int, Int>? {
+    val key = emote.cacheKey(baseHeightPx)
+    return getDimensions(key) ?: getPartialDimensions(key)
+}
+
+/** Returns whether the URL was opened. */
 fun launchCustomTab(
     context: Context,
     url: String,
-) {
+): Boolean {
     try {
         CustomTabsIntent
             .Builder()
             .setShowTitle(true)
             .build()
             .launchUrl(context, url.toUri())
+        return true
+    } catch (e: Exception) {
+        logger.error(e) { "Error launching URL" }
+        return false
+    }
+}
+
+// The browser only shows a partial tab to callers it can identify, which a launch for result provides
+fun launchPartialCustomTab(
+    context: Context,
+    url: String,
+    streamBottomPx: Int,
+    resultLauncher: ActivityResultLauncher<Intent>,
+) {
+    val windowHeight = context
+        .getSystemService(WindowManager::class.java)
+        .currentWindowMetrics.bounds
+        .height()
+    // Browsers raise anything below half the window to half, users can drag the tab up from there
+    val initialHeight =
+        when {
+            streamBottomPx > 0 -> windowHeight - streamBottomPx
+            else -> windowHeight / 2
+        }
+    val intent =
+        CustomTabsIntent
+            .Builder()
+            .setShowTitle(true)
+            .setInitialActivityHeightPx(initialHeight)
+            // A breakpoint wider than the window keeps the tab a full-width bottom sheet
+            .setActivitySideSheetBreakpointDp(context.resources.configuration.screenWidthDp + 1)
+            .build()
+            .intent
+            .setData(url.toUri())
+    try {
+        resultLauncher.launch(intent)
     } catch (e: Exception) {
         logger.error(e) { "Error launching URL" }
     }

@@ -1,12 +1,12 @@
-# ![](/icon.png) TinyDankChat
+# ![](/icon.png) TinyDank
 
-[![Build status](https://github.com/ilotterytea/TinyDankChat/workflows/Android%20CI/badge.svg)](https://github.com/ilotterytea/TinyDankChat/actions)  
+[![Build status](https://github.com/shungitescasa/TinyDank/workflows/Android%20CI/badge.svg)](https://github.com/shungitescasa/TinyDank/actions)  
 <!--[<img src="https://play.google.com/intl/en_us/badges/images/generic/en_badge_web_generic.png" alt="Get it on Google Play" height="80">](https://play.google.com/store/apps/details?id=com.flxrs.dankchat)-->
 <!--[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" alt="Get it on F-Droid" height="80">](https://f-droid.org/packages/com.flxrs.dankchat)  -->
 
 Based on [DankChat](https://github.com/flex3r/DankChat) made by @flex3rs and contributors
 
-A signed release version is available [here](https://github.com/ilotterytea/TinyDankChat/releases/tag/release)  
+A signed release version is available [here](https://github.com/shungitescasa/TinyDank/releases/tag/release)  
 Make sure to click "install anyway" when a Play Protect dialog pops up during installation.   
 
 <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/screen1.png" width="30%"/> <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/screen2.png" width="30%"/> <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/screen8.png" width="30%"/>

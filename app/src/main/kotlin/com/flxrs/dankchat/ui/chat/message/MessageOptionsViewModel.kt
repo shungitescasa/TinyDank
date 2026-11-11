@@ -3,17 +3,16 @@ package com.flxrs.dankchat.ui.chat.message
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flxrs.dankchat.data.api.helix.HelixApiException
+import com.flxrs.dankchat.data.chat.canReplyTo
 import com.flxrs.dankchat.data.repo.PinnedMessageRepository
 import com.flxrs.dankchat.data.repo.RepliesRepository
 import com.flxrs.dankchat.data.repo.channel.ChannelRepository
-import com.flxrs.dankchat.data.repo.chat.ChatConnector
 import com.flxrs.dankchat.data.repo.chat.ChatMessageRepository
 import com.flxrs.dankchat.data.repo.chat.ChatNotificationRepository
 import com.flxrs.dankchat.data.repo.chat.ChatRepository
 import com.flxrs.dankchat.data.repo.chat.UserStateRepository
 import com.flxrs.dankchat.data.repo.command.CommandRepository
 import com.flxrs.dankchat.data.repo.command.CommandResult
-import com.flxrs.dankchat.data.twitch.chat.ConnectionState
 import com.flxrs.dankchat.data.twitch.message.AutomodMessage
 import com.flxrs.dankchat.data.twitch.message.PrivMessage
 import com.flxrs.dankchat.data.twitch.message.SystemMessageType
@@ -44,7 +43,6 @@ class MessageOptionsViewModel(
     private val commandRepository: CommandRepository,
     private val repliesRepository: RepliesRepository,
     private val chatMessageRepository: ChatMessageRepository,
-    private val chatConnector: ChatConnector,
     private val chatNotificationRepository: ChatNotificationRepository,
     private val pinnedMessageRepository: PinnedMessageRepository,
 ) : ViewModel() {
@@ -60,21 +58,32 @@ class MessageOptionsViewModel(
         collectJob?.cancel()
         collectJob = viewModelScope.launch {
             val messageFlow = flowOf(chatMessageRepository.findMessage(params.messageId, params.channel, chatNotificationRepository.whispers))
-            val connectionStateFlow = chatConnector.getConnectionState(params.channel ?: WhisperMessage.WHISPER_CHANNEL)
+            val replyAvailableFlow =
+                when (params.replyAction) {
+                    MessageReplyAction.Channel -> flowOf(true)
+
+                    MessageReplyAction.JumpToChannel -> {
+                        params.channel?.let { channel ->
+                            chatMessageRepository.getChat(channel).map { it.canReplyTo(params.messageId) }
+                        } ?: flowOf(false)
+                    }
+
+                    is MessageReplyAction.Whisper -> flowOf(true)
+
+                    null -> flowOf(false)
+                }
 
             combine(
                 userStateRepository.userState,
-                connectionStateFlow,
+                replyAvailableFlow,
                 messageFlow,
-            ) { userState, connectionState, message ->
+            ) { userState, replyAvailable, message ->
                 when (message) {
-                    null -> {
-                        MessageOptionsState.NotFound
-                    }
+                    null -> null
 
                     is AutomodMessage -> {
                         val originalMessage = message.messageText.orEmpty()
-                        MessageOptionsState.Found.AutomodMessage(
+                        MessageOptionsState.AutomodMessage(
                             name = message.userName,
                             originalMessage = originalMessage,
                             canModerate = params.canModerate && params.channel != null && params.channel in userState.moderationChannels,
@@ -87,9 +96,10 @@ class MessageOptionsViewModel(
                         val asWhisperMessage = message as? WhisperMessage
                         val thread = asPrivMessage?.thread
                         val rootId = thread?.rootId
-                        val name = asPrivMessage?.name ?: asWhisperMessage?.name ?: return@combine MessageOptionsState.NotFound
+                        val name = asPrivMessage?.name ?: asWhisperMessage?.name ?: return@combine null
                         val originalMessage = (asPrivMessage?.originalMessage ?: asWhisperMessage?.originalMessage).orEmpty()
-                        MessageOptionsState.Found.RegularMessage(
+                        val replyAction = params.replyAction.takeIf { replyAvailable }
+                        MessageOptionsState.RegularMessage(
                             messageId = message.id,
                             rootThreadId = rootId ?: message.id,
                             rootThreadName = thread?.name,
@@ -99,16 +109,14 @@ class MessageOptionsViewModel(
                             originalMessage = originalMessage,
                             canModerate = params.canModerate && params.channel != null && params.channel in userState.moderationChannels,
                             urls = extractUrls(originalMessage).toImmutableList(),
-                            hasReplyThread = params.canReply && rootId != null && repliesRepository.hasMessageThread(rootId),
-                            canReply = connectionState == ConnectionState.CONNECTED && params.canReply,
+                            hasReplyThread = replyAction == MessageReplyAction.Channel && rootId != null && repliesRepository.hasMessageThread(rootId),
+                            replyAction = replyAction,
                         )
                     }
                 }
             }.collect { optionsState ->
-                _state.value = MessageOptionsUiState(
-                    optionsState = optionsState,
-                    params = params,
-                )
+                // A message that left its buffer has no options, the sheet stays closed
+                _state.value = optionsState?.let { MessageOptionsUiState(optionsState = it, params = params) }
             }
         }
     }
@@ -121,18 +129,24 @@ class MessageOptionsViewModel(
 
     fun timeoutUser(index: Int) = viewModelScope.launch {
         val duration = TIMEOUT_MAP[index] ?: return@launch
-        val name = (_state.value?.optionsState as? MessageOptionsState.Found)?.name ?: return@launch
+        val name = _state.value?.optionsState?.name ?: return@launch
         sendCommand(".timeout $name $duration")
     }
 
     fun banUser() = viewModelScope.launch {
-        val name = (_state.value?.optionsState as? MessageOptionsState.Found)?.name ?: return@launch
+        val name = _state.value?.optionsState?.name ?: return@launch
         sendCommand(".ban $name")
     }
 
     fun unbanUser() = viewModelScope.launch {
-        val name = (_state.value?.optionsState as? MessageOptionsState.Found)?.name ?: return@launch
+        val name = _state.value?.optionsState?.name ?: return@launch
         sendCommand(".unban $name")
+    }
+
+    fun warnUser(reason: String) = viewModelScope.launch {
+        val name = _state.value?.optionsState?.name ?: return@launch
+        val singleLineReason = reason.lines().filter { it.isNotBlank() }.joinToString(separator = " ")
+        sendCommand(".warn $name $singleLineReason")
     }
 
     fun deleteMessage() = viewModelScope.launch {

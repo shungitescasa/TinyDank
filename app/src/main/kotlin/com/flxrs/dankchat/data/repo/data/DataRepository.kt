@@ -11,6 +11,7 @@ import com.flxrs.dankchat.data.api.helix.HelixApiClient
 import com.flxrs.dankchat.data.api.helix.dto.StreamDto
 import com.flxrs.dankchat.data.api.helix.dto.UserFollowsDto
 import com.flxrs.dankchat.data.api.seventv.SevenTVApiClient
+import com.flxrs.dankchat.data.api.seventv.dto.SevenTVUserDto
 import com.flxrs.dankchat.data.api.seventv.eventapi.SevenTVEventApiClient
 import com.flxrs.dankchat.data.api.seventv.eventapi.SevenTVEventMessage
 import com.flxrs.dankchat.data.api.tiny.TinyEmotesApiClient
@@ -37,6 +38,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.koin.core.annotation.Single
 import java.io.File
@@ -63,6 +66,9 @@ class DataRepository(
     private val _dataUpdateEvents = MutableSharedFlow<DataUpdateEventMessage>()
     private val serviceEventChannel = Channel<ServiceEvent>(Channel.BUFFERED)
 
+    // Keeps a channel removal and a load of the same channel from interleaving their 7TV subscription changes
+    private val sevenTVSubscriptionMutex = Mutex()
+
     init {
         scope.launch {
             sevenTVEventApiClient.messages.collect { event ->
@@ -74,11 +80,11 @@ class DataRepository(
                             return@collect
                         }
 
+                        // Subscribe before fetching so no update to the new set is missed, events are handled after the set is applied
+                        sevenTVEventApiClient.subscribeEmoteSet(event.emoteSetId)
                         val newEmoteSet = sevenTVApiClient.getSevenTVEmoteSet(event.emoteSetId).getOrNull() ?: return@collect
                         emoteRepository.setSevenTVEmoteSet(channel, newEmoteSet)
-
                         sevenTVEventApiClient.unsubscribeEmoteSet(event.oldEmoteSetId)
-                        sevenTVEventApiClient.subscribeEmoteSet(event.emoteSetId)
                         _dataUpdateEvents.emit(DataUpdateEventMessage.ActiveEmoteSetChanged(channel, event.actorName, newEmoteSet.name))
                     }
 
@@ -117,11 +123,16 @@ class DataRepository(
         sevenTVEventApiClient.reconnectIfNecessary()
     }
 
-    suspend fun removeChannels(removed: List<UserName>) {
+    suspend fun removeChannels(removed: List<UserName>) = sevenTVSubscriptionMutex.withLock {
         removed.forEach { channel ->
+            // Added again in the meantime, its subscriptions are in use
+            if (emoteRepository.hasChannel(channel)) {
+                return@forEach
+            }
             val details = emoteRepository.getSevenTVUserDetails(channel) ?: return@forEach
             sevenTVEventApiClient.unsubscribeUser(details.id)
             sevenTVEventApiClient.unsubscribeEmoteSet(details.activeEmoteSetId)
+            emoteRepository.clearSevenTVEmotes(channel)
         }
     }
 
@@ -192,6 +203,7 @@ class DataRepository(
                 flow = cachedEmoteProvider.getFFZChannelEmotes(channelId, forceNetwork),
                 onData = { emoteRepository.setFFZEmotes(channel, it) },
                 onFailure = { getOrEmitFailure { DataLoadingStep.ChannelFFZEmotes(channel, channelId) } },
+                onMissing = { emoteRepository.clearFFZEmotes(channel) },
             )
         }
     }
@@ -211,6 +223,7 @@ class DataRepository(
                 flow = cachedEmoteProvider.getBTTVChannelEmotes(channelId, forceNetwork),
                 onData = { emoteRepository.setBTTVEmotes(channel, channelDisplayName, it) },
                 onFailure = { getOrEmitFailure { DataLoadingStep.ChannelBTTVEmotes(channel, channelDisplayName, channelId) } },
+                onMissing = { emoteRepository.clearBTTVEmotes(channel) },
             )
         }
     }
@@ -262,15 +275,32 @@ class DataRepository(
         measureTimeAndLog(logger, "7TV emotes for #$channel") {
             collectCachedEmotes(
                 flow = cachedEmoteProvider.getSevenTVChannelEmotes(channelId, forceNetwork),
-                onData = { result ->
-                    if (result.emoteSet?.id != null) {
-                        sevenTVEventApiClient.subscribeEmoteSet(result.emoteSet.id)
-                    }
-                    sevenTVEventApiClient.subscribeUser(result.user.id)
-                    emoteRepository.setSevenTVEmotes(channel, result)
-                },
+                onData = { result -> applySevenTVEmotes(channel, result) },
                 onFailure = { getOrEmitFailure { DataLoadingStep.ChannelSevenTVEmotes(channel, channelId) } },
+                onMissing = { emoteRepository.clearSevenTVEmotes(channel) },
             )
+        }
+    }
+
+    private suspend fun applySevenTVEmotes(
+        channel: UserName,
+        result: SevenTVUserDto,
+    ) = sevenTVSubscriptionMutex.withLock {
+        // A load can finish after its channel was removed, it must not subscribe again
+        if (!emoteRepository.hasChannel(channel)) {
+            return@withLock
+        }
+
+        val previousEmoteSetId = emoteRepository.getSevenTVUserDetails(channel)?.activeEmoteSetId
+        if (result.emoteSet?.id != null) {
+            sevenTVEventApiClient.subscribeEmoteSet(result.emoteSet.id)
+        }
+        sevenTVEventApiClient.subscribeUser(result.user.id)
+        emoteRepository.setSevenTVEmotes(channel, result)
+
+        // The cached emote set can differ from the current one, its subscription would stay behind
+        if (previousEmoteSetId != null && emoteRepository.getChannelForSevenTVEmoteSet(previousEmoteSetId) == null) {
+            sevenTVEventApiClient.unsubscribeEmoteSet(previousEmoteSetId)
         }
     }
 
@@ -365,13 +395,17 @@ class DataRepository(
         flow: Flow<CachedResult<T?>>,
         onData: suspend (T) -> Unit,
         onFailure: Result<EmoteLoadResult>.() -> Unit,
+        onMissing: suspend () -> Unit = {},
         instanceUrl: String? = null
     ): Result<EmoteLoadResult> {
         var loadResult: Result<EmoteLoadResult> = Result.success(EmoteLoadResult.Loaded)
         flow.collect { result ->
             when (result) {
                 is CachedResult.Success -> {
-                    result.data?.let { onData(it) }
+                    when (val data = result.data) {
+                        null -> onMissing()
+                        else -> onData(data)
+                    }
                 }
 
                 is CachedResult.CachedFallback -> {

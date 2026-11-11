@@ -14,8 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TooltipState
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,9 +37,11 @@ import com.flxrs.dankchat.preferences.chat.UserLongClickBehavior
 import com.flxrs.dankchat.ui.chat.emote.EmoteInfoViewModel
 import com.flxrs.dankchat.ui.chat.message.MessageOptionsParams
 import com.flxrs.dankchat.ui.chat.message.MessageOptionsViewModel
+import com.flxrs.dankchat.ui.chat.message.MessageReplyAction
 import com.flxrs.dankchat.ui.chat.user.UserPopupStateParams
 import com.flxrs.dankchat.ui.chat.user.UserPopupViewModel
 import com.flxrs.dankchat.ui.main.input.ChatInputViewModel
+import com.flxrs.dankchat.ui.main.sheet.SheetNavigationViewModel
 import kotlinx.collections.immutable.ImmutableList
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
@@ -49,6 +52,7 @@ import org.koin.core.parameter.parametersOf
 fun ChatComposable(
     channel: UserName,
     onReplyClick: (String, UserName) -> Unit,
+    scrollState: ChatScrollState,
     modifier: Modifier = Modifier,
     scrollModifier: Modifier = Modifier,
     isCollectionActive: Boolean = true,
@@ -56,7 +60,8 @@ fun ChatComposable(
     showInput: Boolean = true,
     isFullscreen: Boolean = false,
     showFabs: Boolean = true,
-    onRecover: () -> Unit = {},
+    onShowInput: () -> Unit = {},
+    onExitFullscreen: () -> Unit = {},
     fabMenuCallbacks: FabMenuCallbacks? = null,
     showPinnedMessage: Boolean = true,
     isToolbarMenuOpen: Boolean = false,
@@ -73,38 +78,91 @@ fun ChatComposable(
     onTourAdvance: (() -> Unit)? = null,
     onTourSkip: (() -> Unit)? = null,
 ) {
+    val channelViewModelStoreOwner = koinViewModel<ChannelViewModelStores>().ownerFor(channel)
     val viewModel: ChatViewModel =
         koinViewModel(
-            key = channel.value,
+            viewModelStoreOwner = channelViewModelStoreOwner,
             parameters = { parametersOf(channel) },
         )
     val pinnedMessageViewModel: PinnedMessageViewModel =
         koinViewModel(
-            key = "pinned-${channel.value}",
+            viewModelStoreOwner = channelViewModelStoreOwner,
             parameters = { parametersOf(channel) },
         )
     val emoteInfoViewModel: EmoteInfoViewModel = koinViewModel()
     val userPopupViewModel: UserPopupViewModel = koinViewModel()
     val messageOptionsViewModel: MessageOptionsViewModel = koinViewModel()
     val chatInputViewModel: ChatInputViewModel = koinViewModel()
+    val sheetNavigationViewModel: SheetNavigationViewModel = koinViewModel()
     val chatSettingsDataStore: ChatSettingsDataStore = koinInject()
     val preferenceStore: DankChatPreferenceStore = koinInject()
 
+    DisposableEffect(pinnedMessageViewModel, isPageVisible) {
+        pinnedMessageViewModel.setVisible(isPageVisible)
+        onDispose { pinnedMessageViewModel.setVisible(false) }
+    }
+
     if (!isCollectionActive) return
 
-    // Offscreen pages keep their last list instead of collecting, so incoming messages on
-    // neighbor channels cost nothing while the page is composed but not visible
-    val frozenMessages = remember { mutableStateOf(viewModel.chatUiStates.value) }
-    val messages: ImmutableList<ChatMessageUiState>
-    if (isPageVisible) {
-        messages = viewModel.chatUiStates.collectAsStateWithLifecycle().value
-        frozenMessages.value = messages
-    } else {
-        messages = frozenMessages.value
-    }
     val displaySettings by viewModel.chatDisplaySettings.collectAsStateWithLifecycle()
     val userLongClickBehavior by chatSettingsDataStore.userLongClickBehavior.collectAsStateWithLifecycle(initialValue = UserLongClickBehavior.MentionsUser)
-    val isLoggedIn = preferenceStore.isLoggedIn
+    val isLoggedIn by preferenceStore.isLoggedInFlow.collectAsStateWithLifecycle(initialValue = preferenceStore.isLoggedIn)
+    val openUserCard: (String?, String, String, String?, List<BadgeUi>) -> Unit = { userId, userName, displayName, ch, badges ->
+        userPopupViewModel.show(
+            UserPopupStateParams(
+                targetUserId = userId?.let { UserId(it) },
+                targetUserName = UserName(userName),
+                targetDisplayName = DisplayName(displayName),
+                channel = ch?.let { UserName(it) },
+                badges = badges.map { it.badge },
+            ),
+        )
+    }
+    val openMessageOptions: (String, String?, String) -> Unit = { messageId, ch, fullMessage ->
+        messageOptionsViewModel.show(
+            MessageOptionsParams(
+                messageId = messageId,
+                channel = ch?.let { UserName(it) },
+                fullMessage = fullMessage,
+                canModerate = isLoggedIn,
+                replyAction = MessageReplyAction.Channel.takeIf { isLoggedIn },
+                canCopy = true,
+            ),
+        )
+    }
+    val openWhisperOptions: (String, String, UserName) -> Unit = { messageId, fullMessage, replyTarget ->
+        messageOptionsViewModel.show(
+            MessageOptionsParams(
+                messageId = messageId,
+                channel = null,
+                fullMessage = fullMessage,
+                canModerate = false,
+                canCopy = true,
+                replyAction = MessageReplyAction.Whisper(replyTarget).takeIf { isLoggedIn },
+            ),
+        )
+    }
+    val onMessageTap =
+        rememberMessageTapHandler(
+            reply = { message ->
+                when {
+                    message.isWhisper -> {
+                        sheetNavigationViewModel.openWhispers()
+                        chatInputViewModel.setWhisperTarget(message.userName)
+                    }
+
+                    else -> {
+                        chatInputViewModel.startReply(message.messageId, message.userName, message.message)
+                    }
+                }
+            },
+            openMessageOptions = { message ->
+                when {
+                    message.isWhisper -> openWhisperOptions(message.messageId, message.fullMessage, message.userName)
+                    else -> openMessageOptions(message.messageId, message.channel?.value, message.fullMessage)
+                }
+            },
+        )
 
     val callbacks =
         ChatScreenCallbacks(
@@ -115,33 +173,20 @@ fun ChatComposable(
                         UserLongClickBehavior.OpensPopup -> isLongPress
                     }
                 if (shouldOpenPopup) {
-                    userPopupViewModel.show(
-                        UserPopupStateParams(
-                            targetUserId = userId?.let { UserId(it) },
-                            targetUserName = UserName(userName),
-                            targetDisplayName = DisplayName(displayName),
-                            channel = ch?.let { UserName(it) },
-                            badges = badges.map { it.badge },
-                        ),
-                    )
+                    openUserCard(userId, userName, displayName, ch, badges)
                 } else {
                     chatInputViewModel.mentionUser(UserName(userName), DisplayName(displayName))
                 }
             },
-            onMessageLongClick = { messageId, ch, fullMessage ->
-                messageOptionsViewModel.show(
-                    MessageOptionsParams(
-                        messageId = messageId,
-                        channel = ch?.let { UserName(it) },
-                        fullMessage = fullMessage,
-                        canModerate = isLoggedIn,
-                        canReply = isLoggedIn,
-                        canCopy = true,
-                    ),
-                )
-            },
+            onMessageLongClick = openMessageOptions,
+            onWhisperLongClick = openWhisperOptions,
             onEmoteClick = { emoteInfoViewModel.show(it) },
             onReplyClick = onReplyClick,
+            onMessageTap = onMessageTap,
+            onWhisperReply = { target ->
+                sheetNavigationViewModel.openWhispers()
+                chatInputViewModel.setWhisperTarget(target)
+            },
             onAutomodAllow = { heldMessageId, ch -> viewModel.manageAutomodMessage(heldMessageId, ch, allow = true) },
             onAutomodDeny = { heldMessageId, ch -> viewModel.manageAutomodMessage(heldMessageId, ch, allow = false) },
             onAutomodBanUser = { messageId, ch, fullMessage ->
@@ -151,7 +196,6 @@ fun ChatComposable(
                         channel = ch?.let { UserName(it) },
                         fullMessage = fullMessage,
                         canModerate = isLoggedIn,
-                        canReply = false,
                         canCopy = false,
                         startWithBan = true,
                     ),
@@ -160,42 +204,51 @@ fun ChatComposable(
         )
 
     Box(modifier = modifier.fillMaxSize()) {
-        ChatScreen(
-            messages = messages,
-            fontSize = displaySettings.fontSize,
-            callbacks = callbacks,
-            animateGifs = displaySettings.animateGifs,
-            fullscreenButtonOpacity = displaySettings.fullscreenButtonOpacity,
-            requireFullscreenExitConfirmation = displaySettings.requireFullscreenExitConfirmation,
-            fabAnchor = displaySettings.fabAnchor,
-            fabOffsetXFraction = displaySettings.fabOffsetXFraction,
-            fabOffsetYFraction = displaySettings.fabOffsetYFraction,
-            onFabPositionChange = viewModel::persistFabPosition,
-            modifier = Modifier.fillMaxSize(),
-            showInput = showInput,
-            isFullscreen = isFullscreen,
-            showFabs = showFabs,
-            onRecover = onRecover,
-            fabMenuCallbacks = fabMenuCallbacks,
-            showTheaterChatModeFab = showTheaterChatModeFab,
-            isTheaterChatDocked = isTheaterChatDocked,
-            onToggleTheaterChatMode = onToggleTheaterChatMode,
-            containerColor = containerColor,
-            contentPadding = contentPadding,
-            scrollModifier = scrollModifier,
-            onScrollToBottom = onScrollToBottom,
-            onScrollDirectionChange = onScrollDirectionChange,
+        ChatMessages(
+            viewModel = viewModel,
+            isPageVisible = isPageVisible,
+            scrollState = scrollState,
             scrollToMessageId = scrollToMessageId,
-            onScrollToMessageHandle = onScrollToMessageHandle,
-            recoveryFabTooltipState = recoveryFabTooltipState,
-            onTourAdvance = onTourAdvance,
-            onTourSkip = onTourSkip,
-        )
+        ) { messages ->
+            ChatScreen(
+                messages = messages,
+                fontSize = displaySettings.fontSize,
+                callbacks = callbacks,
+                scrollState = scrollState,
+                animateGifs = displaySettings.animateGifs,
+                fullscreenButtonOpacity = displaySettings.fullscreenButtonOpacity,
+                requireFullscreenExitConfirmation = displaySettings.requireFullscreenExitConfirmation,
+                fabAnchor = displaySettings.fabAnchor,
+                fabOffsetXFraction = displaySettings.fabOffsetXFraction,
+                fabOffsetYFraction = displaySettings.fabOffsetYFraction,
+                onFabPositionChange = viewModel::persistFabPosition,
+                modifier = Modifier.fillMaxSize(),
+                showInput = showInput,
+                isFullscreen = isFullscreen,
+                showFabs = showFabs,
+                onShowInput = onShowInput,
+                onExitFullscreen = onExitFullscreen,
+                fabMenuCallbacks = fabMenuCallbacks,
+                showTheaterChatModeFab = showTheaterChatModeFab,
+                isTheaterChatDocked = isTheaterChatDocked,
+                onToggleTheaterChatMode = onToggleTheaterChatMode,
+                containerColor = containerColor,
+                contentPadding = contentPadding,
+                scrollModifier = scrollModifier,
+                onScrollToBottom = onScrollToBottom,
+                onScrollDirectionChange = onScrollDirectionChange,
+                scrollToMessageId = scrollToMessageId,
+                onScrollToMessageHandle = onScrollToMessageHandle,
+                recoveryFabTooltipState = recoveryFabTooltipState,
+                onTourAdvance = onTourAdvance,
+                onTourSkip = onTourSkip,
+            )
+        }
 
         // Compact window heights (landscape phones) have no room for the banner, collapse it into
         // the toolbar pin icon; it can still be expanded manually and new pins still pop up
         val isCompactHeightWindow =
-            !currentWindowAdaptiveInfo().windowSizeClass.isHeightAtLeastBreakpoint(WindowSizeClass.HEIGHT_DP_MEDIUM_LOWER_BOUND)
+            !currentWindowAdaptiveInfoV2().windowSizeClass.isHeightAtLeastBreakpoint(WindowSizeClass.HEIGHT_DP_MEDIUM_LOWER_BOUND)
         SideEffect(isCompactHeightWindow) {
             if (isCompactHeightWindow) {
                 pinnedMessageViewModel.collapse()
@@ -232,6 +285,7 @@ fun ChatComposable(
                 if (bannerState != null) {
                     PinnedMessageBanner(
                         state = bannerState,
+                        remainingTime = pinnedMessageViewModel.remainingTime,
                         fontSize = displaySettings.fontSize,
                         animateGifs = displaySettings.animateGifs,
                         callbacks = callbacks,
@@ -242,4 +296,33 @@ fun ChatComposable(
             }
         }
     }
+}
+
+// Reads the messages in its own scope, so new messages recompose the list instead of the whole chat
+@Composable
+private fun ChatMessages(
+    viewModel: ChatViewModel,
+    isPageVisible: Boolean,
+    scrollState: ChatScrollState,
+    scrollToMessageId: String?,
+    content: @Composable (ImmutableList<ChatMessageUiState>) -> Unit,
+) {
+    // Offscreen pages keep their last list instead of collecting, so incoming messages on
+    // neighbor channels cost nothing while the page is composed but not visible
+    val frozenMessages = remember { mutableStateOf(viewModel.chatUiStates.value) }
+    val targetMessages: ImmutableList<ChatMessageUiState>
+    if (isPageVisible) {
+        targetMessages = viewModel.chatUiStates.collectAsStateWithLifecycle().value
+        frozenMessages.value = targetMessages
+    } else {
+        targetMessages = frozenMessages.value
+    }
+    // Only a chat following the newest messages catches up gradually, a scrolled or jumping list needs every message
+    val messages =
+        rememberCaughtUpMessages(
+            target = targetMessages,
+            isEnabled = scrollState.shouldAutoScroll && scrollToMessageId == null,
+            startEmpty = !isPageVisible,
+        )
+    content(messages)
 }

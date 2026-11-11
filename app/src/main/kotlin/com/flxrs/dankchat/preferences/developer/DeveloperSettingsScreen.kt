@@ -41,6 +41,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
@@ -358,6 +359,12 @@ private fun DeveloperSettingsContent(
                     isChecked = settings.repeatedSending,
                     onClick = { onInteraction(DeveloperSettingsInteraction.RepeatedSending(it)) },
                 )
+                SwitchPreferenceItem(
+                    title = stringResource(R.string.preference_emote_animation_clock_title),
+                    summary = stringResource(R.string.preference_emote_animation_clock_summary),
+                    isChecked = settings.emoteAnimationClock,
+                    onClick = { onInteraction(DeveloperSettingsInteraction.EmoteAnimationClock(it)) },
+                )
                 ExpandablePreferenceItem(title = stringResource(R.string.preference_rm_host_title)) {
                     CustomRecentMessagesHostBottomSheet(
                         initialHost = settings.customRecentMessagesHost,
@@ -557,7 +564,7 @@ private fun CustomLoginBottomSheet(
             }
 
             var showPassword by remember { mutableStateOf(false) }
-            androidx.compose.material3.OutlinedSecureTextField(
+            OutlinedSecureTextField(
                 modifier =
                     Modifier
                         .fillMaxWidth()

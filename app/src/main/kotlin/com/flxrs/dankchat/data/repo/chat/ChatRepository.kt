@@ -34,6 +34,7 @@ class ChatRepository(
     private val authDataStore: AuthDataStore,
     private val chatSettingsDataStore: ChatSettingsDataStore,
     private val messageRateTracker: ChannelMessageRateTracker,
+    private val recentMessagesHandler: RecentMessagesHandler,
 ) {
     val activeChannel get() = chatChannelProvider.activeChannel
     val channels get() = chatChannelProvider.channels
@@ -112,6 +113,7 @@ class ChatRepository(
                 )
             val fakeItem = ChatItem(fakeMessage, isMentionTab = true)
             chatNotificationRepository.addWhisper(fakeItem)
+            chatMessageRepository.broadcastWhisperIfEnabled(fakeItem)
         }
     }
 
@@ -119,12 +121,14 @@ class ChatRepository(
 
     fun getRecentMessages(): ImmutableList<String> = chatEventProcessor.getRecentMessagesForDisplay(chatChannelProvider.activeChannel.value)
 
+    internal val lastReceivedWhisperUser get() = chatEventProcessor.lastReceivedWhisperUser
+
     internal val lastMessagesFlow get() = chatEventProcessor.lastMessagesFlow
 
-    fun appendLastMessage(
+    fun addMessageToHistory(
         channel: UserName,
         message: String,
-    ) = chatEventProcessor.setLastMessage(channel, message)
+    ) = chatEventProcessor.addMessageToHistory(channel, message)
 
     suspend fun loadRecentMessagesIfEnabled(channel: UserName) {
         if (chatSettingsDataStore.settings.first().loadMessageHistory) {
@@ -151,7 +155,8 @@ class ChatRepository(
         chatConnector.removeConnectionState(channel)
         chatConnector.partChannel(channel)
         chatNotificationRepository.removeMentionFlows(channel)
-        chatEventProcessor.removeLastMessages(channel)
+        chatNotificationRepository.removeChannelNotifications(channel)
+        chatEventProcessor.removeChannel(channel)
         usersRepository.removeChannel(channel)
         userStateRepository.removeChannel(channel)
         pinnedMessageRepository.removeChannel(channel)
@@ -159,5 +164,6 @@ class ChatRepository(
         emoteRepository.removeChannel(channel)
         messageProcessor.cleanupMessageThreadsInChannel(channel)
         messageRateTracker.removeChannel(channel)
+        recentMessagesHandler.removeChannel(channel)
     }
 }

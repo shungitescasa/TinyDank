@@ -15,12 +15,17 @@ data class ChatSettings(
     @Deprecated("Migrated to suggestionTypes") val suggestions: Boolean = true,
     @Deprecated("Migrated to suggestionTypes") val supibotSuggestions: Boolean = false,
     val customCommands: List<CustomCommand> = emptyList(),
+    val showTwitchGifs: Boolean = true,
     val animateGifs: Boolean = true,
     val scrollbackLength: Int = 500,
+    val messageTapAction: MessageTapAction = MessageTapAction.DoNothing,
     val showUsernames: Boolean = true,
     val userLongClickBehavior: UserLongClickBehavior = UserLongClickBehavior.MentionsUser,
     val colorizeNicknames: Boolean = true,
+    val boldUsernameMentions: Boolean = true,
+    val colorUsernameMentions: Boolean = true,
     val showTimedOutMessages: Boolean = true,
+    val showWhispersInline: Boolean = false,
     val showTimestamps: Boolean = true,
     val timestampFormat: String = DEFAULT_TIMESTAMP_FORMAT,
     val visibleBadges: List<VisibleBadges> = VisibleBadges.entries,
@@ -78,6 +83,18 @@ data class TinyInstance(@Transient val id: String = Uuid.random().toString(), va
 enum class UserLongClickBehavior {
     MentionsUser,
     OpensPopup,
+}
+
+@Serializable
+enum class MessageTapAction {
+    DoNothing,
+    Reply,
+    Mention,
+    Whisper,
+    OpenUserCard,
+    OpenMessageOptions,
+    CopyMessage,
+    CopyFullMessage,
 }
 
 enum class VisibleBadges {

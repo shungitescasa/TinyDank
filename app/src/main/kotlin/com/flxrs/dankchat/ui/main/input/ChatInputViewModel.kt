@@ -5,6 +5,7 @@ import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.placeCursorAtEnd
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.text.TextRange
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flxrs.dankchat.R
@@ -17,28 +18,31 @@ import com.flxrs.dankchat.data.repo.chat.ChatRepository
 import com.flxrs.dankchat.data.repo.chat.UserStateRepository
 import com.flxrs.dankchat.data.repo.command.CommandRepository
 import com.flxrs.dankchat.data.repo.command.CommandResult
+import com.flxrs.dankchat.data.repo.command.expandReplyToLastWhisper
 import com.flxrs.dankchat.data.repo.emote.EmoteRepository
 import com.flxrs.dankchat.data.repo.emote.EmoteUsageRepository
 import com.flxrs.dankchat.data.repo.stream.StreamDataRepository
 import com.flxrs.dankchat.data.twitch.chat.ConnectionState
 import com.flxrs.dankchat.data.twitch.command.TwitchCommand
+import com.flxrs.dankchat.data.twitch.message.RoomState
 import com.flxrs.dankchat.di.DispatchersProvider
 import com.flxrs.dankchat.preferences.DankChatPreferenceStore
 import com.flxrs.dankchat.preferences.appearance.AppearanceSettingsDataStore
 import com.flxrs.dankchat.preferences.chat.ChatSettingsDataStore
 import com.flxrs.dankchat.preferences.chat.SuggestionMode
 import com.flxrs.dankchat.preferences.chat.SuggestionType
+import com.flxrs.dankchat.preferences.chat.UserLongClickBehavior
 import com.flxrs.dankchat.preferences.notifications.NotificationsSettingsDataStore
 import com.flxrs.dankchat.preferences.stream.StreamsSettingsDataStore
 import com.flxrs.dankchat.ui.chat.suggestion.Suggestion
 import com.flxrs.dankchat.ui.chat.suggestion.SuggestionProvider
 import com.flxrs.dankchat.ui.main.InputState
-import com.flxrs.dankchat.ui.main.MainEvent
-import com.flxrs.dankchat.ui.main.MainEventBus
 import com.flxrs.dankchat.ui.main.RepeatedSendData
 import com.flxrs.dankchat.ui.main.sheet.FullScreenSheetState
 import com.flxrs.dankchat.utils.TextResource
 import com.flxrs.dankchat.utils.extensions.combine
+import com.flxrs.dankchat.utils.extensions.runCatchingCancellable
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -47,7 +51,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
@@ -57,11 +60,14 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.koin.core.annotation.KoinViewModel
+
+private val logger = KotlinLogging.logger("ChatInputViewModel")
 
 @OptIn(FlowPreview::class)
 @KoinViewModel
@@ -79,27 +85,24 @@ class ChatInputViewModel(
     private val notificationsSettingsDataStore: NotificationsSettingsDataStore,
     private val emoteRepository: EmoteRepository,
     private val emoteUsageRepository: EmoteUsageRepository,
-    private val mainEventBus: MainEventBus,
     streamsSettingsDataStore: StreamsSettingsDataStore,
     streamDataRepository: StreamDataRepository,
     dispatchersProvider: DispatchersProvider,
+    savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
-    val textFieldState = TextFieldState()
+    val textFieldState = TextFieldState(initialText = savedStateHandle.get<String>(DRAFT_KEY).orEmpty())
 
-    private val _isReplying = MutableStateFlow(false)
-    private val _replyMessageId = MutableStateFlow<String?>(null)
-    private val _replyName = MutableStateFlow<UserName?>(null)
-    private val _replyMessage = MutableStateFlow<String?>(null)
+    private val inputMode = MutableStateFlow<InputMode>(InputMode.Default)
     private val repeatedSend = MutableStateFlow(RepeatedSendData(enabled = false, message = ""))
     private val fullScreenSheetState = MutableStateFlow<FullScreenSheetState>(FullScreenSheetState.Closed)
     private val mentionSheetTab = MutableStateFlow(0)
     private val _isEmoteMenuOpen = MutableStateFlow(false)
 
-    private val _whisperTarget = MutableStateFlow<UserName?>(null)
     private var lastWhisperText: String? = null
-    val whisperTarget: StateFlow<UserName?> = _whisperTarget.asStateFlow()
-
-    private val _isAnnouncing = MutableStateFlow(false)
+    val whisperTarget: StateFlow<UserName?> =
+        inputMode
+            .map { (it as? InputMode.Whisper)?.target }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private val _isEncrypting = MutableStateFlow(false)
 
     private val codePointCount =
@@ -139,7 +142,8 @@ class ChatInputViewModel(
             appearanceSettingsDataStore.settings.map { it.showCharacterCounter }.distinctUntilChanged(),
         ) { codePoints, showCharacterCounter ->
             when {
-                showCharacterCounter -> CharacterCounterState.Visible(
+                // Shown near the limit regardless of the setting, since sending is blocked past it
+                showCharacterCounter || codePoints > MESSAGE_CODE_POINT_WARNING -> CharacterCounterState.Visible(
                     text = "$codePoints/$MESSAGE_CODE_POINT_LIMIT",
                     isOverLimit = codePoints > MESSAGE_CODE_POINT_LIMIT,
                 )
@@ -158,13 +162,20 @@ class ChatInputViewModel(
             if (!showModes || channel == null) {
                 flowOf(emptyList())
             } else {
-                channelRepository.getRoomStateFlow(channel).map { it.toDisplayTextResources() }
+                val roomStateFlow = channelRepository.getRoomStateFlow(channel)
+                roomStateFlow
+                    .map { it.toDisplayTextResources() }
+                    .onStart {
+                        if (roomStateFlow.replayCache.isEmpty()) {
+                            emit(persistentListOf())
+                        }
+                    }
             }
         }.distinctUntilChanged()
             .map { it.toImmutableList() }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), persistentListOf())
 
-    private val currentStreamInfo: StateFlow<StreamInfoData?> =
+    private val currentStreamInfo: StateFlow<StreamInfoText?> =
         combine(
             streamsSettingsDataStore.showStreamsInfo,
             chatChannelProvider.activeChannel,
@@ -173,7 +184,7 @@ class ChatInputViewModel(
             val data = streamData.find { it.channel == activeChannel }
             when {
                 data == null || !streamInfoEnabled -> null
-                else -> StreamInfoData(full = data.formattedData, compact = data.formattedDataCompact)
+                else -> StreamInfoText(full = data.formattedData, compact = data.formattedDataCompact)
             }
         }.distinctUntilChanged()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -186,7 +197,7 @@ class ChatInputViewModel(
         ) { roomState, streamInfo, compact ->
             HelperText(
                 roomStateParts = roomState.toImmutableList(),
-                streamInfo = if (compact) streamInfo?.compact else streamInfo?.full,
+                streamInfo = streamInfo,
                 isCompact = compact,
             )
         }.distinctUntilChanged()
@@ -198,22 +209,57 @@ class ChatInputViewModel(
         viewModelScope.launch {
             chatChannelProvider.activeChannel.collect {
                 repeatedSend.update { data -> data.copy(enabled = false) }
-                setReplying(false)
-                _isAnnouncing.value = false
+                inputMode.update { mode ->
+                    when (mode) {
+                        is InputMode.Reply, InputMode.Announce -> InputMode.Default
+                        else -> mode
+                    }
+                }
             }
         }
 
-        // Clear whisper target when sheet closes or tab switches away from whispers
+        viewModelScope.launch {
+            textFlow.collect { text ->
+                val expanded = expandReplyToLastWhisper(text, chatRepository.lastReceivedWhisperUser.value) ?: return@collect
+                textFieldState.edit {
+                    replace(0, length, expanded)
+                    placeCursorAtEnd()
+                }
+            }
+        }
+
         viewModelScope.launch {
             combine(fullScreenSheetState, mentionSheetTab) { sheetState, tab ->
                 sheetState to tab
             }.collect { (sheetState, tab) ->
-                val isWhisperTab = (sheetState is FullScreenSheetState.Mention || sheetState is FullScreenSheetState.Whisper) && tab == 1
-                if (!isWhisperTab && _whisperTarget.value != null) {
-                    _whisperTarget.value = null
-                    textFieldState.clearText()
+                val isMentionSheet = sheetState is FullScreenSheetState.Mention || sheetState is FullScreenSheetState.Whisper
+                val isWhisperTab = isMentionSheet && tab == 1
+                // The history sheet hides the input, an open emote menu would stay on top of it
+                if (sheetState is FullScreenSheetState.History) {
+                    _isEmoteMenuOpen.value = false
+                }
+
+                val mode = inputMode.value
+                when {
+                    // A whisper target only lasts while the whispers tab is shown
+                    mode is InputMode.Whisper && !isWhisperTab -> {
+                        inputMode.value = InputMode.Default
+                        textFieldState.clearText()
+                    }
+
+                    // Sheets with an input send to their own target, an announcement armed in the channel must not go there
+                    mode is InputMode.Announce && (isMentionSheet || sheetState is FullScreenSheetState.Replies) -> {
+                        inputMode.value = InputMode.Default
+                    }
                 }
             }
+        }
+
+        // The draft comes back after the process was recreated. A whisper text is left out, it would return in the channel input
+        viewModelScope.launch {
+            combine(textFlow, inputMode) { text, mode ->
+                text.takeIf { mode !is InputMode.Whisper && it.length <= MAX_SAVED_DRAFT_LENGTH }.orEmpty()
+            }.collect { savedStateHandle[DRAFT_KEY] = it }
         }
 
         viewModelScope.launch {
@@ -221,6 +267,10 @@ class ChatInputViewModel(
                 if (it.enabled && it.message.isNotBlank()) {
                     while (isActive) {
                         val activeChannel = chatChannelProvider.activeChannel.value ?: break
+                        // Without a connection every further message would only fail
+                        if (chatConnector.getConnectionState(activeChannel).value != ConnectionState.CONNECTED) {
+                            break
+                        }
                         val delay = userStateRepository.getSendDelay(activeChannel)
                         trySendMessageOrCommand(it.message, skipSuspendingCommands = true)
                         delay(delay)
@@ -248,7 +298,7 @@ class ChatInputViewModel(
 
         val baseFlow =
             combine(
-                textFlow.map { it.isNotBlank() }.distinctUntilChanged(),
+                textFlow.map { InputTextState(hasText = it.isNotBlank(), isOverLimit = it.isOverMessageLimit()) }.distinctUntilChanged(),
                 chatChannelProvider.activeChannel,
                 chatChannelProvider.activeChannel.flatMapLatest { channel ->
                     if (channel == null) {
@@ -257,32 +307,29 @@ class ChatInputViewModel(
                         chatConnector.getConnectionState(channel)
                     }
                 },
-                appearanceSettingsDataStore.settings.map { InputSettings(it.autoDisableInput, it.showCharacterCounter, it.showClearInputButton, it.showSendButton, it.inputActions.isEmpty()) },
+                appearanceSettingsDataStore.settings.map {
+                    InputSettings(
+                        autoDisableInput = it.autoDisableInput,
+                        showCharacterCounter = it.showCharacterCounter,
+                        showSendWaitTimer = it.showSendWaitTimer,
+                        showClearInputButton = it.showClearInputButton,
+                        showSendButton = it.showSendButton,
+                        isCompactMode = it.inputActions.isEmpty(),
+                    )
+                },
                 preferenceStore.isLoggedInFlow,
-            ) { hasText, activeChannel, connectionState, inputSettings, isLoggedIn ->
-                UiDependencies(hasText, activeChannel, connectionState, isLoggedIn, inputSettings)
-            }
-
-        val replyStateFlow =
-            combine(
-                _isReplying,
-                _replyName,
-                _replyMessageId,
-                _replyMessage,
-            ) { isReplying, replyName, replyMessageId, replyMessage ->
-                ReplyState(isReplying, replyName, replyMessageId, replyMessage)
+            ) { textState, activeChannel, connectionState, inputSettings, isLoggedIn ->
+                UiDependencies(textState, activeChannel, connectionState, isLoggedIn, inputSettings)
             }
 
         val inputOverlayFlow =
             combine(
                 externalSheetState,
                 externalMentionTab,
-                replyStateFlow,
+                inputMode,
                 _isEmoteMenuOpen,
-                _whisperTarget,
-                _isAnnouncing,
-            ) { sheetState, tab, replyState, isEmoteMenuOpen, whisperTarget, isAnnouncing ->
-                InputOverlayState(sheetState, tab, replyState.isReplying, replyState.replyName, replyState.replyMessageId, replyState.replyMessage, isEmoteMenuOpen, whisperTarget, isAnnouncing)
+            ) { sheetState, tab, mode, isEmoteMenuOpen ->
+                InputOverlayState(sheetState, tab, mode, isEmoteMenuOpen)
             }
 
         val encryptionFlow =
@@ -299,14 +346,19 @@ class ChatInputViewModel(
             baseFlow,
             inputOverlayFlow,
             helperText,
-            chatSettingsDataStore.userLongClickBehavior,
+            chatSettingsDataStore.settings
+                .map { InputChatSettings(userLongClickBehavior = it.userLongClickBehavior, animateEmotes = it.animateGifs) }
+                .distinctUntilChanged(),
             chatRepository.lastMessagesFlow,
             encryptionFlow,
-        ) { deps, overlayState, helperText, userLongClickBehavior, _, encryption ->
+        ) { deps, overlayState, helperText, chatSettings, _, encryption ->
             val isMentionsTabActive = (overlayState.sheetState is FullScreenSheetState.Mention || overlayState.sheetState is FullScreenSheetState.Whisper) && overlayState.tab == 0
             val isWhisperTabActive = (overlayState.sheetState is FullScreenSheetState.Mention || overlayState.sheetState is FullScreenSheetState.Whisper) && overlayState.tab == 1
             val isInReplyThread = overlayState.sheetState is FullScreenSheetState.Replies
-            val effectiveIsReplying = overlayState.isReplying || isInReplyThread
+            val mode = overlayState.mode
+            // The whisper target applies on the whispers tab only, everywhere else the input sends to the channel
+            val whisperTarget = (mode as? InputMode.Whisper)?.target?.takeIf { isWhisperTabActive }
+            val reply = mode as? InputMode.Reply
             val canTypeInConnectionState = deps.connectionState == ConnectionState.CONNECTED || !deps.inputSettings.autoDisableInput
 
             val inputState =
@@ -314,9 +366,9 @@ class ChatInputViewModel(
                     ConnectionState.CONNECTED -> {
                         when {
                             encryption.isEncrypting -> InputState.Encrypting
-                            isWhisperTabActive && overlayState.whisperTarget != null -> InputState.Whispering
-                            effectiveIsReplying -> InputState.Replying
-                            overlayState.isAnnouncing -> InputState.Announcing
+                            whisperTarget != null -> InputState.Whispering
+                            reply != null || isInReplyThread -> InputState.Replying
+                            mode is InputMode.Announce -> InputState.Announcing
                             encryption.isActive -> InputState.Encrypted
                             else -> InputState.Default
                         }
@@ -334,19 +386,19 @@ class ChatInputViewModel(
             val enabled =
                 when {
                     isMentionsTabActive -> false
-                    isWhisperTabActive -> deps.isLoggedIn && canTypeInConnectionState && overlayState.whisperTarget != null
+                    isWhisperTabActive -> deps.isLoggedIn && canTypeInConnectionState && whisperTarget != null
                     else -> deps.isLoggedIn && canTypeInConnectionState
                 }
 
-            val canSend = deps.hasText && deps.activeChannel != null && deps.connectionState == ConnectionState.CONNECTED && deps.isLoggedIn && enabled && !encryption.isEncrypting
+            // Twitch silently drops chat messages over the limit, whispers accept longer ones
+            val isWithinLimit = !deps.textState.isOverLimit || isWhisperTabActive
+            val canSend = deps.textState.hasText && isWithinLimit && deps.activeChannel != null && deps.connectionState == ConnectionState.CONNECTED && deps.isLoggedIn && enabled && !encryption.isEncrypting
 
-            val effectiveReplyName = overlayState.replyName ?: (overlayState.sheetState as? FullScreenSheetState.Replies)?.replyName
-            val effectiveReplyMessage = overlayState.replyMessage.orEmpty()
             val overlay =
                 when {
-                    overlayState.isReplying && !isInReplyThread && effectiveReplyName != null -> InputOverlay.Reply(effectiveReplyName, effectiveReplyMessage)
-                    isWhisperTabActive && overlayState.whisperTarget != null -> InputOverlay.Whisper(overlayState.whisperTarget)
-                    overlayState.isAnnouncing -> InputOverlay.Announce
+                    whisperTarget != null -> InputOverlay.Whisper(whisperTarget)
+                    reply != null && !isInReplyThread -> InputOverlay.Reply(reply.name, reply.message)
+                    mode is InputMode.Announce -> InputOverlay.Announce
                     else -> InputOverlay.None
                 }
 
@@ -363,14 +415,16 @@ class ChatInputViewModel(
                 isLoggedIn = deps.isLoggedIn,
                 inputState = inputState,
                 overlay = overlay,
-                replyMessageId = overlayState.replyMessageId ?: (overlayState.sheetState as? FullScreenSheetState.Replies)?.replyMessageId,
+                replyMessageId = reply?.messageId ?: (overlayState.sheetState as? FullScreenSheetState.Replies)?.replyMessageId,
                 isEmoteMenuOpen = overlayState.isEmoteMenuOpen,
                 helperText = helperText,
                 isWhisperTabActive = isWhisperTabActive,
                 showClearInputButton = deps.inputSettings.showClearInputButton,
                 showSendButton = deps.inputSettings.showSendButton,
+                showSendWaitTimer = deps.inputSettings.showSendWaitTimer && !isWhisperTabActive,
                 isCompactMode = deps.inputSettings.isCompactMode,
-                userLongClickBehavior = userLongClickBehavior,
+                userLongClickBehavior = chatSettings.userLongClickBehavior,
+                animateEmotes = chatSettings.animateEmotes,
                 isEncryptionEnabled = encryption.isEnabled,
                 encryptOnSend = encryption.encryptOnSend,
             )
@@ -379,22 +433,22 @@ class ChatInputViewModel(
 
     fun sendMessage() {
         val text = textFieldState.text.toString()
+        val mode = inputMode.value
+        // Keeps the text in the input instead of losing it to a message Twitch drops
         // The send button is disabled while encrypting, but the keyboard action is not
-        if (_isEncrypting.value) {
+        if ((mode !is InputMode.Whisper && text.isOverMessageLimit()) || _isEncrypting.value) {
             return
         }
         if (text.isNotBlank()) {
-            val whisperTarget = _whisperTarget.value
-            val isAnnouncing = _isAnnouncing.value
             val messageToSend =
-                when {
-                    whisperTarget != null -> "/w ${whisperTarget.value} $text"
-                    isAnnouncing -> "/announce $text"
-                    else -> text
+                when (mode) {
+                    is InputMode.Whisper -> "/w ${mode.target.value} $text"
+                    InputMode.Announce -> "/announce $text"
+                    is InputMode.Reply, InputMode.Default -> text
                 }
-            lastWhisperText = if (whisperTarget != null) text else null
-            if (isAnnouncing) {
-                _isAnnouncing.value = false
+            lastWhisperText = if (mode is InputMode.Whisper) text else null
+            if (mode is InputMode.Announce) {
+                inputMode.value = InputMode.Default
             }
             trackEmoteUsagesInMessage(text)
             trySendMessageOrCommand(messageToSend)
@@ -419,26 +473,36 @@ class ChatInputViewModel(
         val replyIdOrNull =
             when {
                 chatState is FullScreenSheetState.Replies -> chatState.replyMessageId
-                _isReplying.value -> _replyMessageId.value
-                else -> null
+                else -> (inputMode.value as? InputMode.Reply)?.messageId
             }
 
         val commandResult =
-            runCatching {
+            runCatchingCancellable {
                 when (chatState) {
-                    FullScreenSheetState.Whisper -> {
+                    is FullScreenSheetState.Whisper -> {
                         commandRepository.checkForWhisperCommand(message, skipSuspendingCommands)
                     }
 
                     else -> {
-                        val roomState = channelRepository.getRoomState(channel) ?: return@launch
+                        // ROOMSTATE arrives only after the JOIN, which is delayed for later channels in large channel lists
+                        val roomState =
+                            channelRepository.getRoomState(channel)
+                                ?: channelRepository.getChannel(channel)?.let { RoomState(channel = channel, channelId = it.id) }
+                                ?: run {
+                                    // The input is already cleared, the history keeps the text
+                                    val response = TextResource.Res(R.string.system_message_send_channel_not_resolved, persistentListOf(channel))
+                                    chatRepository.makeAndPostCustomSystemMessage(response, channel)
+                                    chatRepository.addMessageToHistory(channel, message)
+                                    return@launch
+                                }
                         val userState = userStateRepository.userState.value
                         val shouldSkip = skipSuspendingCommands || chatState is FullScreenSheetState.Replies
                         commandRepository.checkForCommands(message, channel, roomState, userState, shouldSkip)
                     }
                 }
             }.getOrElse {
-                mainEventBus.emitEvent(MainEvent.Error(it))
+                logger.error(it) { "Failed to check for commands" }
+                chatRepository.makeAndPostCustomSystemMessage(TextResource.Res(R.string.cmd_error_unknown), channel)
                 return@launch
             }
 
@@ -449,12 +513,12 @@ class ChatInputViewModel(
 
             is CommandResult.IrcCommand -> {
                 chatRepository.sendMessage(message, replyIdOrNull, forceIrc = true)
-                setReplying(false)
+                cancelReply()
             }
 
             is CommandResult.NotFound -> {
                 sendChatMessage(message, replyIdOrNull)
-                setReplying(false)
+                cancelReply()
             }
 
             is CommandResult.UnknownCommand -> {
@@ -463,13 +527,17 @@ class ChatInputViewModel(
             }
 
             is CommandResult.AcceptedTwitchCommand -> {
-                if (commandResult.command == TwitchCommand.Whisper) {
+                val whisperSent =
+                    commandResult.command == TwitchCommand.Whisper &&
+                        (commandResult.response as? TextResource.Res)?.id == R.string.cmd_whisper_sent
+                if (whisperSent) {
                     chatRepository.fakeWhisperIfNecessary(message)
                 }
                 val isWhisperContext =
                     chatState is FullScreenSheetState.Whisper ||
-                        (chatState is FullScreenSheetState.Mention && _whisperTarget.value != null)
-                if (commandResult.response != null && !isWhisperContext) {
+                        (chatState is FullScreenSheetState.Mention && inputMode.value is InputMode.Whisper)
+                val inlineWhisperReplacesResponse = whisperSent && chatSettingsDataStore.current().showWhispersInline
+                if (commandResult.response != null && !isWhisperContext && !inlineWhisperReplacesResponse) {
                     chatRepository.makeAndPostCustomSystemMessage(commandResult.response, channel)
                 }
             }
@@ -480,12 +548,12 @@ class ChatInputViewModel(
 
             is CommandResult.Message -> {
                 sendChatMessage(commandResult.message, replyIdOrNull)
-                setReplying(false)
+                cancelReply()
             }
         }
 
         if (commandResult != CommandResult.NotFound && commandResult != CommandResult.IrcCommand) {
-            chatRepository.appendLastMessage(channel, message)
+            chatRepository.addMessageToHistory(channel, message)
         }
     }
 
@@ -511,13 +579,14 @@ class ChatInputViewModel(
     fun getLastMessage() {
         val message =
             when {
-                _whisperTarget.value != null -> lastWhisperText
+                inputMode.value is InputMode.Whisper -> lastWhisperText
                 else -> chatRepository.getLastMessage()
             } ?: return
         setInputFromHistory(message)
     }
 
     fun setInputFromHistory(message: String) {
+        showInput()
         textFieldState.edit {
             replace(0, length, message)
             placeCursorAtEnd()
@@ -531,24 +600,42 @@ class ChatInputViewModel(
         }
     }
 
-    fun setReplying(
-        replying: Boolean,
-        replyMessageId: String? = null,
-        replyName: UserName? = null,
-        replyMessage: String? = null,
+    fun startReply(
+        messageId: String,
+        name: UserName,
+        message: String,
     ) {
-        _isReplying.value = replying || replyMessageId != null
-        _replyMessageId.value = replyMessageId
-        _replyName.value = replyName
-        _replyMessage.value = replyMessage
+        showInput()
+        inputMode.value = InputMode.Reply(messageId, name, message)
+    }
+
+    fun cancelReply() {
+        inputMode.update { mode ->
+            when (mode) {
+                is InputMode.Reply -> InputMode.Default
+                else -> mode
+            }
+        }
     }
 
     fun setAnnouncing(announcing: Boolean) {
-        _isAnnouncing.value = announcing
+        inputMode.update { mode ->
+            when {
+                announcing -> InputMode.Announce
+                mode is InputMode.Announce -> InputMode.Default
+                else -> mode
+            }
+        }
     }
 
     fun setWhisperTarget(target: UserName?) {
-        _whisperTarget.value = target
+        inputMode.update { mode ->
+            when {
+                target != null -> InputMode.Whisper(target)
+                mode is InputMode.Whisper -> InputMode.Default
+                else -> mode
+            }
+        }
         if (target == null) {
             textFieldState.clearText()
         }
@@ -564,6 +651,7 @@ class ChatInputViewModel(
     }
 
     fun insertText(text: String) {
+        showInput()
         val selection = textFieldState.selection
         textFieldState.edit {
             replace(selection.min, selection.max, text)
@@ -625,6 +713,12 @@ class ChatInputViewModel(
         }
     }
 
+    fun applyFirstSuggestion(): Boolean {
+        val suggestion = suggestions.value.firstOrNull() ?: return false
+        applySuggestion(suggestion)
+        return true
+    }
+
     fun addEmoteUsage(emoteId: String) {
         viewModelScope.launch {
             emoteUsageRepository.addEmoteUsage(emoteId)
@@ -641,9 +735,37 @@ class ChatInputViewModel(
         }
     }
 
+    // A reply or inserted text must not go to an input that is off screen. Sheets with their own send target always show it
+    private fun showInput() {
+        val isInputSheet =
+            when (fullScreenSheetState.value) {
+                is FullScreenSheetState.Replies,
+                is FullScreenSheetState.Mention,
+                is FullScreenSheetState.Whisper,
+                -> true
+
+                is FullScreenSheetState.History,
+                FullScreenSheetState.Closed,
+                -> false
+            }
+        if (isInputSheet || appearanceSettingsDataStore.current().showInput) {
+            return
+        }
+        viewModelScope.launch {
+            appearanceSettingsDataStore.update { it.copy(showInput = true) }
+        }
+    }
+
     companion object {
         private const val SUGGESTION_DEBOUNCE_MS = 50L
         private const val MESSAGE_CODE_POINT_LIMIT = 500
+        private const val MESSAGE_CODE_POINT_WARNING = 450
+        private const val DRAFT_KEY = "draft"
+
+        // Saved state has a size limit, a pasted text beyond any message length is not worth risking it
+        private const val MAX_SAVED_DRAFT_LENGTH = 10_000
+
+        private fun String.isOverMessageLimit(): Boolean = codePointCount(0, length) > MESSAGE_CODE_POINT_LIMIT
     }
 }
 
@@ -685,41 +807,52 @@ private data class SuggestionInput(
 private data class InputSettings(
     val autoDisableInput: Boolean,
     val showCharacterCounter: Boolean,
+    val showSendWaitTimer: Boolean,
     val showClearInputButton: Boolean,
     val showSendButton: Boolean,
     val isCompactMode: Boolean,
 )
 
-private data class UiDependencies(
+private data class InputChatSettings(
+    val userLongClickBehavior: UserLongClickBehavior,
+    val animateEmotes: Boolean,
+)
+
+private data class InputTextState(
     val hasText: Boolean,
+    val isOverLimit: Boolean,
+)
+
+private data class UiDependencies(
+    val textState: InputTextState,
     val activeChannel: UserName?,
     val connectionState: ConnectionState,
     val isLoggedIn: Boolean,
     val inputSettings: InputSettings,
 )
 
-private data class ReplyState(
-    val isReplying: Boolean,
-    val replyName: UserName?,
-    val replyMessageId: String?,
-    val replyMessage: String?,
-)
+// What the next message is sent as, one mode replaces another
+private sealed interface InputMode {
+    data object Default : InputMode
+
+    data class Reply(
+        val messageId: String,
+        val name: UserName,
+        val message: String,
+    ) : InputMode
+
+    data class Whisper(
+        val target: UserName,
+    ) : InputMode
+
+    data object Announce : InputMode
+}
 
 private data class InputOverlayState(
     val sheetState: FullScreenSheetState,
     val tab: Int,
-    val isReplying: Boolean,
-    val replyName: UserName?,
-    val replyMessageId: String?,
-    val replyMessage: String?,
+    val mode: InputMode,
     val isEmoteMenuOpen: Boolean,
-    val whisperTarget: UserName?,
-    val isAnnouncing: Boolean,
-)
-
-private data class StreamInfoData(
-    val full: String,
-    val compact: String,
 )
 
 private data class EncryptionState(

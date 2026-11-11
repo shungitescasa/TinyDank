@@ -91,6 +91,7 @@ import com.flxrs.dankchat.preferences.components.CheckboxWithText
 import com.flxrs.dankchat.preferences.components.DankBackground
 import com.flxrs.dankchat.preferences.components.NavigationBarSpacer
 import com.flxrs.dankchat.preferences.components.PreferenceTabRow
+import com.flxrs.dankchat.preferences.notifications.InvalidRegexSupportingText
 import com.flxrs.dankchat.ui.chat.ChatMessageMapper
 import com.flxrs.dankchat.utils.compose.HexColorPicker
 import com.flxrs.dankchat.utils.compose.animatedAppBarColor
@@ -399,6 +400,7 @@ private fun MessageHighlightItem(
             MessageHighlightItem.Type.Encrypted -> R.string.highlights_entry_encrypted_messages
             MessageHighlightItem.Type.ChannelPointRedemption -> R.string.highlights_ignores_entry_redemptions
             MessageHighlightItem.Type.Reply -> R.string.highlights_ignores_entry_replies
+            MessageHighlightItem.Type.InlineWhisper -> R.string.highlights_ignores_entry_inline_whispers
             MessageHighlightItem.Type.Custom -> R.string.highlights_ignores_entry_custom
         }
     val isCustom = item.type == MessageHighlightItem.Type.Custom
@@ -431,6 +433,8 @@ private fun MessageHighlightItem(
                 value = item.pattern,
                 onValueChange = { onChange(item.copy(pattern = it)) },
                 label = { Text(stringResource(R.string.pattern)) },
+                isError = item.hasInvalidRegex,
+                supportingText = InvalidRegexSupportingText.takeIf { item.hasInvalidRegex },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 maxLines = 1,
             )
@@ -492,7 +496,7 @@ private fun MessageHighlightItem(
                 MessageHighlightItem.Type.Encrypted -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.Encrypted, isDark)
                 MessageHighlightItem.Type.FirstMessage -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.FirstMessage, isDark)
                 MessageHighlightItem.Type.Username -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.Username, isDark)
-                MessageHighlightItem.Type.Reply, MessageHighlightItem.Type.Custom -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.Reply, isDark)
+                MessageHighlightItem.Type.Reply, MessageHighlightItem.Type.InlineWhisper, MessageHighlightItem.Type.Custom -> ChatMessageMapper.defaultHighlightColorInt(HighlightType.Reply, isDark)
             }
         HighlightColorPicker(
             color = item.customColor ?: defaultColor,
@@ -665,6 +669,8 @@ private fun BlacklistedUserItem(
                     value = item.username,
                     onValueChange = { onChange(item.copy(username = it)) },
                     label = { Text(stringResource(R.string.username)) },
+                    isError = item.hasInvalidRegex,
+                    supportingText = InvalidRegexSupportingText.takeIf { item.hasInvalidRegex },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     maxLines = 1,
                 )

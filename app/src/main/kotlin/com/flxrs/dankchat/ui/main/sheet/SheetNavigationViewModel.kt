@@ -1,21 +1,58 @@
 package com.flxrs.dankchat.ui.main.sheet
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewModelScope
 import com.flxrs.dankchat.data.UserName
+import com.flxrs.dankchat.data.repo.chat.ChatChannelProvider
+import com.flxrs.dankchat.data.repo.chat.ChatNotificationRepository
 import com.flxrs.dankchat.ui.chat.history.HistoryChannel
+import com.flxrs.dankchat.utils.AppLifecycleListener
+import com.flxrs.dankchat.utils.AppLifecycleListener.AppLifecycle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import org.koin.core.annotation.KoinViewModel
 
 @KoinViewModel
-class SheetNavigationViewModel : ViewModel() {
+class SheetNavigationViewModel(
+    private val savedStateHandle: SavedStateHandle,
+    chatChannelProvider: ChatChannelProvider,
+    chatNotificationRepository: ChatNotificationRepository,
+    appLifecycleListener: AppLifecycleListener,
+) : ViewModel() {
     private val _fullScreenSheetState = MutableStateFlow<FullScreenSheetState>(FullScreenSheetState.Closed)
     val fullScreenSheetState: StateFlow<FullScreenSheetState> = _fullScreenSheetState.asStateFlow()
+
+    // Saved sheet UI states are matched by open id, so the ids continue after the process is recreated
+    private var openCount: Long
+        get() = savedStateHandle[OPEN_COUNT_KEY] ?: 0L
+        set(value) {
+            savedStateHandle[OPEN_COUNT_KEY] = value
+        }
+
+    init {
+        // The active channel is read while the app is in the foreground and no full screen sheet covers the chat
+        viewModelScope.launch {
+            combine(appLifecycleListener.appState, chatChannelProvider.activeChannel, _fullScreenSheetState) { appState, channel, sheet ->
+                channel.takeIf { appState == AppLifecycle.Foreground && sheet == FullScreenSheetState.Closed }
+            }.filterNotNull()
+                .collect(chatNotificationRepository::markChannelRead)
+        }
+    }
+
+    // Holds the view models of the replies sheet, opening another thread releases the previous one
+    val repliesViewModelStoreOwner: ViewModelStoreOwner =
+        object : ViewModelStoreOwner {
+            override val viewModelStore = ViewModelStore()
+        }
 
     private val _inputSheetState = MutableStateFlow<InputSheetState>(InputSheetState.Closed)
 
@@ -31,22 +68,23 @@ class SheetNavigationViewModel : ViewModel() {
         rootMessageId: String,
         replyName: UserName,
     ) {
-        _fullScreenSheetState.value = FullScreenSheetState.Replies(rootMessageId, replyName)
+        repliesViewModelStoreOwner.viewModelStore.clear()
+        _fullScreenSheetState.value = FullScreenSheetState.Replies(rootMessageId, replyName, openId = ++openCount)
     }
 
     fun openMentions() {
-        _fullScreenSheetState.value = FullScreenSheetState.Mention
+        _fullScreenSheetState.value = FullScreenSheetState.Mention(openId = ++openCount)
     }
 
     fun openWhispers() {
-        _fullScreenSheetState.value = FullScreenSheetState.Whisper
+        _fullScreenSheetState.value = FullScreenSheetState.Whisper(openId = ++openCount)
     }
 
     fun openHistory(
         channel: HistoryChannel,
         initialFilter: String = "",
     ) {
-        _fullScreenSheetState.value = FullScreenSheetState.History(channel, initialFilter)
+        _fullScreenSheetState.value = FullScreenSheetState.History(channel, initialFilter, openId = ++openCount)
     }
 
     fun closeFullScreenSheet() {
@@ -59,5 +97,13 @@ class SheetNavigationViewModel : ViewModel() {
 
     fun closeInputSheet() {
         _inputSheetState.value = InputSheetState.Closed
+    }
+
+    override fun onCleared() {
+        repliesViewModelStoreOwner.viewModelStore.clear()
+    }
+
+    companion object {
+        private const val OPEN_COUNT_KEY = "openCount"
     }
 }

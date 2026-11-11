@@ -2,6 +2,7 @@ package com.flxrs.dankchat.ui.main.channel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.flxrs.dankchat.R
 import com.flxrs.dankchat.data.UserName
 import com.flxrs.dankchat.data.repo.IgnoresRepository
 import com.flxrs.dankchat.data.repo.channel.ChannelRepository
@@ -13,11 +14,17 @@ import com.flxrs.dankchat.data.repo.chat.ChatRepository
 import com.flxrs.dankchat.domain.ChannelDataCoordinator
 import com.flxrs.dankchat.preferences.DankChatPreferenceStore
 import com.flxrs.dankchat.preferences.model.ChannelWithRename
+import com.flxrs.dankchat.preferences.notifications.NotificationsSettingsDataStore
+import com.flxrs.dankchat.utils.TextResource
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableSet
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -33,6 +40,7 @@ class ChannelManagementViewModel(
     private val chatNotificationRepository: ChatNotificationRepository,
     private val ignoresRepository: IgnoresRepository,
     private val channelRepository: ChannelRepository,
+    private val notificationsSettingsDataStore: NotificationsSettingsDataStore,
     channelSelectionDataStore: ChannelSelectionDataStore,
 ) : ViewModel() {
     val channels: StateFlow<ImmutableList<ChannelWithRename>> =
@@ -40,6 +48,19 @@ class ChannelManagementViewModel(
             .getChannelsWithRenamesFlow()
             .map { it.toImmutableList() }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), persistentListOf())
+
+    val mutedNotificationChannels: StateFlow<ImmutableSet<UserName>> =
+        combine(channels, notificationsSettingsDataStore.settings) { channels, settings ->
+            channels
+                .map { it.channel }
+                .filterNot { settings.areChannelNotificationsEnabled(it) }
+                .toImmutableSet()
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), persistentSetOf())
+
+    val activeChannelNotificationsEnabled: StateFlow<Boolean> =
+        combine(chatChannelProvider.activeChannel, notificationsSettingsDataStore.settings) { channel, settings ->
+            channel == null || settings.areChannelNotificationsEnabled(channel)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     init {
         // Restore persisted channel selection, falling back to first channel
@@ -61,9 +82,9 @@ class ChannelManagementViewModel(
                 val currentChannels = channelList.map { it.channel }.toSet()
                 val newChannels = currentChannels - previousChannels
 
-                newChannels.forEach { channel ->
-                    chatRepository.joinChannel(channel)
-                    channelDataCoordinator.loadChannelData(channel)
+                newChannels.forEach(chatRepository::joinChannel)
+                if (newChannels.isNotEmpty()) {
+                    channelDataCoordinator.loadChannelsData(newChannels)
                 }
                 previousChannels = currentChannels
             }
@@ -72,14 +93,18 @@ class ChannelManagementViewModel(
 
     fun isChannelAdded(name: String): Boolean = preferenceStore.channels.any { it.value.equals(name, ignoreCase = true) }
 
-    fun addChannel(channel: UserName) {
-        val normalized = channel.lowercase()
+    fun addChannels(channels: List<UserName>) {
         val current = preferenceStore.channels
-        if (normalized !in current) {
-            preferenceStore.channels = current + normalized
-            chatRepository.joinChannel(normalized)
-            chatChannelProvider.setActiveChannel(normalized)
-        }
+        val newChannels =
+            channels
+                .map(UserName::lowercase)
+                .distinct()
+                .filterNot(current::contains)
+        if (newChannels.isEmpty()) return
+
+        preferenceStore.channels = current + newChannels
+        newChannels.forEach(chatRepository::joinChannel)
+        chatChannelProvider.setActiveChannel(newChannels.last())
     }
 
     fun removeChannel(channel: UserName) {
@@ -87,26 +112,11 @@ class ChannelManagementViewModel(
         preferenceStore.removeChannel(channel)
         chatRepository.updateChannels(preferenceStore.channels)
         channelDataCoordinator.cleanupChannel(channel)
+        removeChannelMutes(listOf(channel))
 
         if (wasActive) {
             chatChannelProvider.setActiveChannel(preferenceStore.channels.firstOrNull())
         }
-    }
-
-    fun renameChannel(
-        channel: UserName,
-        displayName: String?,
-    ) {
-        val rename = displayName?.ifBlank { null }?.let { UserName(it) }
-        preferenceStore.setRenamedChannel(ChannelWithRename(channel, rename))
-    }
-
-    fun retryChannelLoading(channel: UserName) {
-        channelDataCoordinator.loadChannelData(channel)
-    }
-
-    fun reloadAllChannels() {
-        channelDataCoordinator.reloadAllChannels()
     }
 
     fun reloadEmotes(channel: UserName) {
@@ -118,16 +128,34 @@ class ChannelManagementViewModel(
         chatConnector.reconnect()
     }
 
-    fun blockChannel(channel: UserName) = viewModelScope.launch {
-        runCatching {
-            if (!preferenceStore.isLoggedIn) {
-                return@launch
-            }
-
-            val channelId = channelRepository.getChannel(channel)?.id ?: return@launch
-            ignoresRepository.addUserBlock(channelId, channel)
-            removeChannel(channel)
+    fun setChannelNotificationsEnabled(
+        channel: UserName,
+        enabled: Boolean,
+    ) {
+        viewModelScope.launch {
+            notificationsSettingsDataStore.setChannelNotificationsEnabled(channel, enabled)
         }
+    }
+
+    fun toggleChannelNotifications(channel: UserName) {
+        viewModelScope.launch {
+            notificationsSettingsDataStore.update { it.withChannelNotificationsEnabled(channel, !it.areChannelNotificationsEnabled(channel)) }
+        }
+    }
+
+    fun blockChannel(channel: UserName) = viewModelScope.launch {
+        if (!preferenceStore.isLoggedIn) {
+            return@launch
+        }
+
+        val channelId = channelRepository.getChannel(channel)?.id ?: return@launch
+        ignoresRepository.addUserBlock(channelId, channel).fold(
+            onSuccess = { removeChannel(channel) },
+            onFailure = {
+                val response = TextResource.Res(R.string.cmd_block_error, persistentListOf(channel.toString()))
+                chatRepository.makeAndPostCustomSystemMessage(response, channel)
+            },
+        )
     }
 
     fun selectChannel(channel: UserName) {
@@ -149,6 +177,7 @@ class ChannelManagementViewModel(
                 // Remove rename
                 preferenceStore.setRenamedChannel(ChannelWithRename(channel, null))
             }
+            removeChannelMutes(removedChannels)
 
             // 2. Update active channel if removed
             val activeChannel = chatChannelProvider.activeChannel.value
@@ -166,6 +195,13 @@ class ChannelManagementViewModel(
         // 4. Apply renames
         updatedChannels.forEach {
             preferenceStore.setRenamedChannel(it)
+        }
+    }
+
+    // A channel that is added again starts with notifications
+    private fun removeChannelMutes(channels: Collection<UserName>) {
+        viewModelScope.launch {
+            notificationsSettingsDataStore.update { it.withoutMutedChannels(channels) }
         }
     }
 }

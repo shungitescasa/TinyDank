@@ -12,11 +12,14 @@ import com.flxrs.dankchat.data.UserId
 import com.flxrs.dankchat.data.UserName
 import com.flxrs.dankchat.preferences.chat.ChatSettingsDataStore
 import com.flxrs.dankchat.preferences.chat.UserLongClickBehavior
+import com.flxrs.dankchat.ui.chat.BadgeUi
 import com.flxrs.dankchat.ui.chat.ChatScreen
 import com.flxrs.dankchat.ui.chat.ChatScreenCallbacks
+import com.flxrs.dankchat.ui.chat.ChatScrollState
 import com.flxrs.dankchat.ui.chat.emote.EmoteInfoViewModel
 import com.flxrs.dankchat.ui.chat.message.MessageOptionsParams
 import com.flxrs.dankchat.ui.chat.message.MessageOptionsViewModel
+import com.flxrs.dankchat.ui.chat.rememberMessageTapHandler
 import com.flxrs.dankchat.ui.chat.user.UserPopupStateParams
 import com.flxrs.dankchat.ui.chat.user.UserPopupViewModel
 import com.flxrs.dankchat.ui.main.input.ChatInputViewModel
@@ -28,6 +31,7 @@ import org.koin.compose.viewmodel.koinViewModel
 fun RepliesComposable(
     repliesViewModel: RepliesViewModel,
     onMissing: () -> Unit,
+    scrollState: ChatScrollState,
     containerColor: Color,
     modifier: Modifier = Modifier,
     scrollModifier: Modifier = Modifier,
@@ -41,6 +45,34 @@ fun RepliesComposable(
     val chatSettingsDataStore: ChatSettingsDataStore = koinInject()
     val displaySettings by repliesViewModel.chatDisplaySettings.collectAsStateWithLifecycle()
     val userLongClickBehavior by chatSettingsDataStore.userLongClickBehavior.collectAsStateWithLifecycle(initialValue = UserLongClickBehavior.MentionsUser)
+    val openUserCard: (String?, String, String, String?, List<BadgeUi>) -> Unit = { userId, userName, displayName, channel, badges ->
+        userPopupViewModel.show(
+            UserPopupStateParams(
+                targetUserId = userId?.let { UserId(it) },
+                targetUserName = UserName(userName),
+                targetDisplayName = DisplayName(displayName),
+                channel = channel?.let { UserName(it) },
+                badges = badges.map { it.badge },
+            ),
+        )
+    }
+    val openMessageOptions: (String, String?, String) -> Unit = { messageId, channel, fullMessage ->
+        messageOptionsViewModel.show(
+            MessageOptionsParams(
+                messageId = messageId,
+                channel = channel?.let { UserName(it) },
+                fullMessage = fullMessage,
+                canModerate = false,
+                canCopy = true,
+                canJump = true,
+            ),
+        )
+    }
+    val onMessageTap =
+        rememberMessageTapHandler(
+            reply = { message -> chatInputViewModel.startReply(message.messageId, message.userName, message.message) },
+            openMessageOptions = { message -> openMessageOptions(message.messageId, message.channel?.value, message.fullMessage) },
+        )
     val uiState by repliesViewModel.uiState.collectAsStateWithLifecycle(initialValue = RepliesUiState.Found(persistentListOf()))
 
     when (uiState) {
@@ -57,34 +89,16 @@ fun RepliesComposable(
                                     UserLongClickBehavior.OpensPopup -> isLongPress
                                 }
                             if (shouldOpenPopup) {
-                                userPopupViewModel.show(
-                                    UserPopupStateParams(
-                                        targetUserId = userId?.let { UserId(it) },
-                                        targetUserName = UserName(userName),
-                                        targetDisplayName = DisplayName(displayName),
-                                        channel = channel?.let { UserName(it) },
-                                        badges = badges.map { it.badge },
-                                    ),
-                                )
+                                openUserCard(userId, userName, displayName, channel, badges)
                             } else {
                                 chatInputViewModel.mentionUser(UserName(userName), DisplayName(displayName))
                             }
                         },
-                        onMessageLongClick = { messageId, channel, fullMessage ->
-                            messageOptionsViewModel.show(
-                                MessageOptionsParams(
-                                    messageId = messageId,
-                                    channel = channel?.let { UserName(it) },
-                                    fullMessage = fullMessage,
-                                    canModerate = false,
-                                    canReply = false,
-                                    canCopy = true,
-                                    canJump = true,
-                                ),
-                            )
-                        },
+                        onMessageLongClick = openMessageOptions,
                         onEmoteClick = { emoteInfoViewModel.show(it) },
+                        onMessageTap = onMessageTap,
                     ),
+                scrollState = scrollState,
                 animateGifs = displaySettings.animateGifs,
                 modifier = modifier,
                 contentPadding = contentPadding,

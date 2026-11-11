@@ -11,6 +11,7 @@ import com.flxrs.dankchat.preferences.appearance.AppearanceSettingsDataStore
 import com.flxrs.dankchat.preferences.chat.ChatSettingsDataStore
 import com.flxrs.dankchat.ui.chat.ChatDisplaySettings
 import com.flxrs.dankchat.ui.chat.ChatMessageMapper
+import com.flxrs.dankchat.ui.chat.ChatMessageMappingCache
 import com.flxrs.dankchat.ui.chat.ChatMessageUiState
 import com.flxrs.dankchat.ui.chat.CheckeredMessageTracker
 import kotlinx.collections.immutable.ImmutableList
@@ -51,6 +52,7 @@ class MentionViewModel(
 
     private val _currentTab = MutableStateFlow(0)
     val currentTab: StateFlow<Int> = _currentTab
+    private val isSheetOpen = MutableStateFlow(false)
 
     val whisperMentionCount: StateFlow<Int> =
         chatNotificationRepository.channelMentionCount
@@ -59,6 +61,10 @@ class MentionViewModel(
 
     fun setCurrentTab(index: Int) {
         _currentTab.value = index
+    }
+
+    fun setSheetOpen(isOpen: Boolean) {
+        isSheetOpen.value = isOpen
     }
 
     fun clearWhisperMentionCount() {
@@ -84,11 +90,21 @@ class MentionViewModel(
 
     private val mentionCheckered = CheckeredMessageTracker()
     private val whisperCheckered = CheckeredMessageTracker()
+    private val mentionMappingCache = ChatMessageMappingCache()
+    private val whisperMappingCache = ChatMessageMappingCache()
 
     init {
-        combine(whispers, currentTab) { _, tab -> tab }
-            .filter { it == 1 }
+        // The tab outlives the sheet, so whispers only count as seen while it is open
+        combine(whispers, currentTab, isSheetOpen) { _, tab, isOpen -> isOpen && tab == 1 }
+            .filter { it }
             .onEach { clearWhisperMentionCount() }
+            .launchIn(viewModelScope)
+
+        // A mention that arrives while the mentions tab is shown counts as seen
+        combine(chatNotificationRepository.channelMentionCount, currentTab, isSheetOpen) { counts, tab, isOpen ->
+            isOpen && tab == 0 && counts.any { (channel, count) -> channel != WhisperMessage.WHISPER_CHANNEL && count > 0 }
+        }.filter { it }
+            .onEach { chatNotificationRepository.clearMentionCounts() }
             .launchIn(viewModelScope)
     }
 
@@ -98,18 +114,19 @@ class MentionViewModel(
             appearanceSettingsDataStore.settings,
             chatSettingsDataStore.settings,
         ) { messages, appearanceSettings, chatSettings ->
-            chatMessageMapper
-                .run {
-                    messages
-                        .map { item ->
-                            val altBg = mentionCheckered.isAlternate(item.message.id) && appearanceSettings.checkeredMessages
-                            mapToUiState(
-                                item = item,
-                                chatSettings = chatSettings,
-                                preferenceStore = preferenceStore,
-                                isAlternateBackground = altBg,
-                            )
-                        }.withHighlightLayout(showLineSeparator = appearanceSettings.lineSeparator)
+            mentionMappingCache
+                .mapWithHighlightLayout(
+                    items = messages,
+                    chatSettings = chatSettings,
+                    showLineSeparator = appearanceSettings.lineSeparator,
+                    isAlternateBackground = { mentionCheckered.isAlternate(it.message.id) && appearanceSettings.checkeredMessages },
+                ) { item, altBg ->
+                    chatMessageMapper.mapToUiState(
+                        item = item,
+                        chatSettings = chatSettings,
+                        preferenceStore = preferenceStore,
+                        isAlternateBackground = altBg,
+                    )
                 }.toImmutableList()
         }.flowOn(dispatchersProvider.default)
 
@@ -119,18 +136,19 @@ class MentionViewModel(
             appearanceSettingsDataStore.settings,
             chatSettingsDataStore.settings,
         ) { messages, appearanceSettings, chatSettings ->
-            chatMessageMapper
-                .run {
-                    messages
-                        .map { item ->
-                            val altBg = whisperCheckered.isAlternate(item.message.id) && appearanceSettings.checkeredMessages
-                            mapToUiState(
-                                item = item,
-                                chatSettings = chatSettings,
-                                preferenceStore = preferenceStore,
-                                isAlternateBackground = altBg,
-                            )
-                        }.withHighlightLayout(showLineSeparator = appearanceSettings.lineSeparator)
+            whisperMappingCache
+                .mapWithHighlightLayout(
+                    items = messages,
+                    chatSettings = chatSettings,
+                    showLineSeparator = appearanceSettings.lineSeparator,
+                    isAlternateBackground = { whisperCheckered.isAlternate(it.message.id) && appearanceSettings.checkeredMessages },
+                ) { item, altBg ->
+                    chatMessageMapper.mapToUiState(
+                        item = item,
+                        chatSettings = chatSettings,
+                        preferenceStore = preferenceStore,
+                        isAlternateBackground = altBg,
+                    )
                 }.toImmutableList()
         }.flowOn(dispatchersProvider.default)
 }

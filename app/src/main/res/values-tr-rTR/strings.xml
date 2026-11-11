@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <string name="app_name">TinyDankChat</string>
-    <string name="app_name_dank">TinyDankChat (Dank)</string>
+    <string name="app_name">TinyDank</string>
+    <string name="app_name_dank">TinyDank (Dank)</string>
     <string name="send_hint">Mesaj gönder</string>
     <string name="login">Giriş yap</string>
     <string name="reload_emotes">İfadeleri yenile</string>
@@ -16,6 +16,7 @@
     <string name="error_dialog_copy">Kopyala</string>
     <string name="error_dialog_title">Hata yakalandı: %1$s</string>
     <string name="add_channel">Kanal ekle</string>
+    <string name="add_channels">Kanal ekle</string>
     <string name="manage_channels">Kanalları yönet</string>
     <string name="report_channel">Kanalı bildir</string>
     <string name="block_channel">Kanalı engelle</string>
@@ -25,6 +26,9 @@
     <string name="channel_blocked_message">Kanal engellendi</string>
     <string name="no_channels_added">Eklenmiş kanal yok</string>
     <string name="no_channels_added_body">Sohbete başlamak için bir kanal ekleyin</string>
+    <string name="enable_channel_notifications">%1$s için arka plan bildirimlerini aç</string>
+    <string name="disable_channel_notifications">%1$s için arka plan bildirimlerini kapat</string>
+    <string name="channel_background_notifications">Arka plan bildirimleri</string>
     <string name="confirm_logout_title">Çıkışı onayla</string>
     <string name="confirm_logout_message">Çıkış yapmak istediğinize emin misiniz?</string>
     <string name="confirm_logout_question">Çıkış yapılsın mı?</string>
@@ -53,9 +57,6 @@
     <string name="hint_not_logged_int">Giriş yapılmadı</string>
     <string name="hint_replying">Yanıt</string>
     <string name="hint_announcing">Duyuru gönder</string>
-    <string name="notification_new_mentions">Yeni bahsetmeleriniz var</string>
-    <string name="notification_mention">%1$s sizden #%2$s\'de bahsetti</string>
-    <string name="notification_notify_mention">#%1$s\'de sizden bahsedildi</string>
     <string name="snackbar_login">%1$s olarak giriş yapıldı</string>
     <string name="snackbar_login_failed">Giriş yapılamadı</string>
     <string name="snackbar_image_uploaded">Kopyalandı: %1$s</string>
@@ -109,9 +110,9 @@
         <item quantity="other">%1$d hafta</item>
     </plurals>
     <string name="duration_join_2">%1$s %2$s</string>
-    <string name="duration_join_3">%1$s %2$s %3$s</string>
     <string name="snackbar_paste">Yapıştır</string>
-    <string name="add_channel_hint">Kanal adı</string>
+    <string name="add_channels_hint">Kanal adları</string>
+    <string name="add_channels_empty">En az bir kanal adı girin</string>
     <string name="add_channel_already_added">Kanal zaten eklenmiş</string>
     <string name="emote_menu_tab_recent">Son kullanılanlar</string>
     <string name="backspace">Geri sil</string>
@@ -121,6 +122,7 @@
     <string name="system_message_connected">Bağlanıldı</string>
     <string name="system_message_reconnected">Yeniden bağlanıldı</string>
     <string name="system_message_channel_non_existent">Bu kanal yok</string>
+    <string name="system_message_channel_join_failed">Bu kanala katılınamadı</string>
     <string name="system_message_disconnected">Bağlantı kesildi</string>
     <string name="system_message_history_unavailable_detailed">Mesaj tarihi servisi kullanılamıyor (Hata %1$s)</string>
     <string name="system_message_history_unavailable">Mesaj tarihi servisi kullanılamıyor</string>
@@ -252,6 +254,7 @@
     </plurals>
     <string name="timed_out_message">&lt; Mesaj silindi &gt;</string>
     <string name="multi_entry_header_regex">Düzenli ifade</string>
+    <string name="multi_entry_invalid_regex">Geçersiz düzenli ifade</string>
     <string name="multi_entry_add_entry">Girdi ekle</string>
     <string name="login_expired">Giriş süresi doldu! Yeniden giriş yapmayı deneyin.</string>
     <string name="message_history_disclaimer_title">Mesaj tarihi açıklaması</string>
@@ -268,6 +271,7 @@ Servis bu hizmeti verebilmek için sizin (ve başkalarının) ziyaret ettiği ka
     <string name="replies_title">Yanıt Akışı</string>
     <string name="whispers">Fısıltılar</string>
     <string name="notification_whisper_mention">%1$s size bir fısıltı gönderdi</string>
+    <string name="notification_whisper_conversation_title">\@%1$s kullanıcısından fısıltı</string>
     <string name="mentions">Bahsetmeler</string>
     <string name="confirm_channel_removal_title">Kanalı kaldırmayı onayla</string>
     <string name="confirm_channel_removal_message">Bu kanalı kaldırmak istediğinizden emin misiniz?</string>
@@ -282,6 +286,7 @@ Servis bu hizmeti verebilmek için sizin (ve başkalarının) ziyaret ettiği ka
     <string name="user_popup_unblock">Engeli kaldır</string>
     <string name="user_popup_mention">Kullanıcıdan bahset</string>
     <string name="user_popup_whisper">Kullanıcıya fısılda</string>
+    <string name="user_popup_ignore_highlights">Öne çıkarmaları yoksay</string>
     <string name="user_popup_created">Oluşturuldu: %1$s</string>
     <string name="user_popup_following_since">%1$s tarihinden beri takipte</string>
     <string name="user_popup_not_following">Takip etmiyor</string>
@@ -294,6 +299,7 @@ Servis bu hizmeti verebilmek için sizin (ve başkalarının) ziyaret ettiği ka
     <string name="restart">Yeniden başlat</string>
     <string name="uploader_reset">Varsayılanlara sıfırla</string>
     <string name="uploader_url">Yükleme URL\'i</string>
+    <string name="uploader_url_unresolved">Bu alan adı bulunamadı</string>
     <string name="uploader_field">Form alanı</string>
     <string name="uploader_headers">Başlıklar</string>
     <string name="uploader_image_link">Medya bağlantı şablonu</string>
@@ -317,9 +323,11 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="menu_exit_fullscreen">Tam ekrandan çık</string>
     <string name="menu_hide_input">Girişi gizle</string>
     <string name="menu_show_input">Girişi göster</string>
+    <string name="menu_enable_tts">TTS\'i etkinleştir</string>
+    <string name="menu_disable_tts">TTS\'i devre dışı bırak</string>
     <string name="preference_fullscreen_button_opacity_title">Tam ekran düğme saydamlığı</string>
     <string name="preference_fullscreen_button_opacity_summary">Tam ekranda veya giriş gizlendiğinde gösterilen düğmeler: %d%%</string>
-    <string name="preference_fullscreen_button_opacity_hint">Saydamlık (1-100)</string>
+    <string name="preference_fullscreen_button_opacity_hint">Saydamlık (1–100)</string>
     <string name="preference_fullscreen_button_opacity_validation">1 ile 100 arasında olmalıdır</string>
     <string name="preference_fullscreen_button_opacity_custom">Özel</string>
     <string name="preference_require_fullscreen_exit_confirmation_title">Tam ekrandan çıkışı onayla</string>
@@ -339,6 +347,7 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="input_action_mod_actions">Kanal moderasyonu</string>
     <string name="input_action_fullscreen">Tam ekran</string>
     <string name="input_action_hide_input">Girişi gizle</string>
+    <string name="input_action_tts">Metin okuma</string>
     <string name="input_action_debug">Hata ayıklama</string>
     <string name="input_action_configure">Eylemleri yapılandır</string>
     <string name="input_action_hide_all">Tüm işlemleri gizle</string>
@@ -415,6 +424,7 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="tts_ignore_list_add_user">Kullanıcı ekle</string>
     <string name="tts_ignore_list_remove_user">Kullanıcıyı kaldır</string>
     <string name="tts_ignore_list_user_hint">Kullanıcı</string>
+    <string name="tts_start_failed">TTS başlatılamadı</string>
     <string name="recent_upload_deletion_link">Silme bağlantısı:
 %1$s</string>
     <string name="recent_uploads_clear">Yüklemeleri temizle</string>
@@ -442,6 +452,7 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="preference_roomstate_summary">Yalnız aboneler modu gibi şimdiki kanal moduna ilişkin bilgi gösterir</string>
     <string name="preference_always_show_pinned_message_title">Sabitlenmiş mesajı her zaman göster</string>
     <string name="preference_always_show_pinned_message_summary">Sabitlenmiş mesajın otomatik olarak daraltılmasını devre dışı bırakır</string>
+    <string name="preference_always_show_pinned_message_moderator_note">Twitch sabitlenmiş mesajları yalnızca moderatörlere gösterebilir</string>
     <string name="preference_show_stream_title_in_live_message_title">Yayın başlığını yayına girme mesajlarında göster</string>
     <string name="preference_compact_channel_info_title">Kompakt kanal bilgisi</string>
     <string name="preference_compact_channel_info_summary">Kanal modlarını ve yayın bilgisini tek satırda gösterir</string>
@@ -454,6 +465,10 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="preference_general_header">Genel</string>
     <string name="preference_suggestions_header">Öneriler</string>
     <string name="preference_messages_header">Mesajlar</string>
+    <string name="preference_message_tap_action_title">Mesaja dokunma eylemi</string>
+    <string name="preference_message_tap_action_do_nothing">Hiçbir şey yapma</string>
+    <string name="preference_message_tap_action_open_user_card">Kullanıcı kartını aç</string>
+    <string name="preference_message_tap_action_open_message_options">Mesaj seçeneklerini aç</string>
     <string name="preference_users_header">Kullanıcılar</string>
     <string name="preference_emotes_badges_header">İfadeler ve Rozetler</string>
     <string name="preference_suggestion_mode_title">Öneri modu</string>
@@ -506,7 +521,10 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="preference_display_group_title">Görünüm</string>
     <string name="preference_components_group_title">Bileşenler</string>
     <string name="preference_show_timed_out_messages_title">Zaman aşımına uğrayan mesajları göster</string>
-    <string name="preference_animate_gifs_title">GIF\'leri hareketlendir</string>
+    <string name="preference_show_whispers_inline_title">Fısıltıları sohbette göster</string>
+    <string name="preference_show_whispers_inline_summary">Gönderilen ve alınan fısıltıları tüm açık kanallarda gösterir</string>
+    <string name="preference_show_twitch_gifs_title">Twitch GIF\'lerini göster</string>
+    <string name="preference_animations_title">İfadeleri, rozetleri ve GIF\'leri hareketlendir</string>
     <string name="preference_line_separator_title">Mesajları çizgiler ile ayır</string>
     <string name="preference_keep_screen_on_title">Ekranı açık tut</string>
     <string name="preference_font_size_title">Yazı tipi boyutu</string>
@@ -551,6 +569,8 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="preference_tts_message_ignore_emote_title">İfadeleri yok say</string>
     <string name="preference_tts_message_ignore_command_message">Komut ön ekiyle (!, $, %, +, -, ~) başlayan mesajları yok sayar</string>
     <string name="preference_tts_message_ignore_command_title">Komutları yok say</string>
+    <string name="preference_tts_ignore_user_name_numbers_title">Kullanıcı adlarındaki sayıları yok say</string>
+    <string name="preference_tts_ignore_user_name_numbers_summary">Kullanıcı adlarını sayılar olmadan okur, örneğin john1990 yerine john</string>
     <string name="preference_tts_volume_title">Ses seviyesi</string>
     <string name="preference_tts_audio_ducking_title">Ses kısma</string>
     <string name="preference_tts_audio_ducking_summary">TTS konuşurken diğer uygulamaların sesini kıs</string>
@@ -561,6 +581,17 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="preference_scrollback_length_title">Mesaj geri dönme uzunluğu</string>
     <string name="preference_show_username_title">Kullanıcı adını göster</string>
     <string name="preference_visible_badges_title">Görünür rozetler</string>
+    <string name="preference_dankchat_account_title">DankChat hesabı</string>
+    <string name="dankchat_badge_automatic">Otomatik</string>
+    <string name="dankchat_badge_automatic_summary">Şu anda: %1$s</string>
+    <string name="dankchat_badge_none">Rozet yok</string>
+    <string name="dankchat_badge_empty">Henüz bir DankChat rozetiniz yok.</string>
+    <string name="dankchat_badge_logged_out">DankChat rozetinizi seçmek için giriş yapın</string>
+    <string name="dankchat_badge_unsupported">Girişiniz burada kullanılamıyor. Rozetinizi bunun yerine dank.chat üzerinden seçin.</string>
+    <string name="dankchat_badge_load_failed">DankChat rozetleriniz yüklenemedi</string>
+    <string name="dankchat_badge_save_failed">Rozet seçiminiz kaydedilemedi</string>
+    <string name="dankchat_account_manage_title">Hesabı dank.chat üzerinde yönet</string>
+    <string name="dankchat_account_manage_summary">Verilerinizi indirin veya hesabınızı silin</string>
     <string name="preference_prefer_emote_suggestions_title">İfade önerilerini yeğle</string>
     <string name="preference_prefer_emote_suggestions_summary">Kullanıcı önerileri yerine ifade önerilerine öncelik ver</string>
     <string name="preference_user_long_click_title">Kullanıcı adına uzun basma davranışı</string>
@@ -568,6 +599,10 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="preference_user_long_click_summary_off">Normal tıklama bahseder, uzun tıklama pencereyi açar</string>
     <string name="preference_colorize_nicknames_title">Takma adları renklendir</string>
     <string name="preference_colorize_nicknames_summary">Belirlenmiş rengi olmayan kullanıcılara rastgele renk ata</string>
+    <string name="preference_bold_username_mentions_title">Kullanıcı adlarını kalın yap</string>
+    <string name="preference_bold_username_mentions_summary">Bahsedilen kullanıcı adlarını daha belirgin yap</string>
+    <string name="preference_color_username_mentions_title">Kullanıcı adlarını renklendir</string>
+    <string name="preference_color_username_mentions_summary">Varsa bahsedilen kullanıcı adları için kullanıcının Twitch rengini kullan</string>
     <string name="preference_tts_force_english_title">Dili İngilizce olmaya zorla</string>
     <string name="preference_tts_force_english_summary">TTS sesini sistem varsayılanı yerine İngilizce olmaya zorla</string>
     <string name="preference_visible_emotes_title">Görünür üçüncü taraf ifadeler</string>
@@ -576,12 +611,38 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="preference_show_chip_actions_summary">Tam ekranı açıp kapamak, yayınlar ve sohbet modlarını ayarlamak için çipler gösterir</string>
     <string name="preference_show_character_counter_title">Karakter sayacını göster</string>
     <string name="preference_show_character_counter_summary">Giriş alanında kod noktası sayısını görüntüler</string>
+    <string name="preference_show_send_wait_timer_title">Yavaş mod ve zaman aşımı geri sayımını göster</string>
+    <string name="preference_show_send_wait_timer_summary">Tekrar ne zaman gönderebileceğini gösterir</string>
     <string name="preference_show_clear_input_button_title">Girdiyi temizle düğmesini göster</string>
     <string name="preference_show_send_button_title">Gönder düğmesini göster</string>
     <string name="preference_input_group_title">Girdi</string>
     <string name="preference_uploader_header">Medya yükleyici</string>
     <string name="preference_uploader_configure_title">Yükleyiciyi ayarla</string>
     <string name="preference_uploader_recent_uploads_title">Son yüklemeler</string>
+    <string name="preference_export_header">Dışa aktar</string>
+    <string name="backup_channels_title">Kanallar</string>
+    <string name="backup_export">Dışa aktar</string>
+    <string name="backup_import">İçe aktar</string>
+    <string name="backup_copy">Panoya kopyala</string>
+    <string name="backup_paste">Panodan yapıştır</string>
+    <string name="backup_channels_description">Tüm kanalları özel adlarıyla birlikte dışa aktarır. İçe aktarma yalnızca eksik kanalları ekler</string>
+    <string name="backup_settings_description">Giriş bilgileriniz hariç tüm ayarları dışa aktarır</string>
+    <string name="backup_settings_uploader_note">Özel yükleyici yapılandırmanızı içerir</string>
+    <string name="import_data_confirmation">Ayarlarınız, kanallarınız, öne çıkarmalarınız ve yok saymalarınız içe aktarılanlarla değiştirilsin mi? Uygulama ardından yeniden başlar.</string>
+    <string name="export_data_done">Ayarlar dışa aktarıldı</string>
+    <string name="export_data_failed">Dosya kaydedilemedi</string>
+    <string name="import_data_failed">Bu dosya okunamadı</string>
+    <string name="import_data_newer_version">Bu yedek, DankChat\'in daha yeni bir sürümüyle oluşturuldu</string>
+    <string name="clipboard_no_export">Pano bir dışa aktarım içermiyor</string>
+    <plurals name="channels_exported">
+        <item quantity="one">%1$d kanal dışa aktarıldı</item>
+        <item quantity="other">%1$d kanal dışa aktarıldı</item>
+    </plurals>
+    <plurals name="channels_imported">
+        <item quantity="one">%1$d kanal eklendi</item>
+        <item quantity="other">%1$d kanal eklendi</item>
+    </plurals>
+    <string name="channels_import_none_new">Bu kanalların tümü zaten ekli</string>
     <string name="preference_tts_user_ignore_list_title">Kullanıcı yok sayma listesi</string>
     <string name="preference_tts_user_ignore_list_summary">Yok sayılacak kullanıcıların/hesapların listesi</string>
     <string name="preference_tools_header">Araçlar</string>
@@ -604,6 +665,8 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="preference_auto_disable_input_title">Sohbet bağlı değilse girdiyi kapat</string>
     <string name="preference_repeated_sending_title">Yinelemeli göndermeyi etkinleştir</string>
     <string name="preference_repeated_sending_summary">Gönder butonu basılıyken sürekli mesaj göndermeyi etkinleştirir</string>
+    <string name="preference_emote_animation_clock_title">Senkronize emote animasyonları</string>
+    <string name="preference_emote_animation_clock_summary">Ekranın daha az yeniden çizilmesi için hareketli emote\'ları birlikte ilerletir</string>
     <string name="oauth_expired_title">Giriş Süresi Doldu!</string>
     <string name="oauth_expired_message">Giriş jetonunuzun süresi doldu! Lütfen yeniden giriş yapın.</string>
     <string name="oauth_expired_login_again">Yeniden Giriş Yap</string>
@@ -612,8 +675,8 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="preference_stream_live_messages_summary">Bir kanal yayına girdiğinde veya yayını sonlandırdığında sohbete bir mesaj ekler</string>
     <string name="preference_stream_extensions_title">Yayın uzantılarını göster</string>
     <string name="preference_stream_extensions_summary">Yayın oynatıcısının üzerinde uzantıları gösterir</string>
-    <string name="preference_retain_webview_title">Yayın yenilemelerini önle</string>
-    <string name="preference_retain_webview_summary">Yön değişikliklerinden ya da DankChat\'in yeniden açılmasından sonra yayın yenilemelerinin deneysel önlenmesini etkinleştirir.</string>
+    <string name="preference_keep_stream_while_typing_title">Yazarken yayını görünür tut</string>
+    <string name="preference_keep_stream_while_typing_summary">Klavye veya ifade menüsü sohbete az yer bıraksa bile yayını dikey modda gösterir</string>
     <string name="preference_show_changelogs">Güncellemeden sonra değişiklik günlüklerini göster</string>
     <string name="preference_whats_new_header">Yenilikler</string>
     <string name="preference_custom_login_title">Özel giriş</string>
@@ -681,6 +744,7 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="highlights_ignores_entry_elevated_messages">Yükseltilmiş Mesaj</string>
     <string name="highlights_ignores_entry_redemptions">Kanal Puanlarıyla alınan Öne Çıkarmalar</string>
     <string name="highlights_ignores_entry_replies">Yanıtlar</string>
+    <string name="highlights_ignores_entry_inline_whispers">Sohbetteki fısıltılar</string>
     <string name="highlights_ignores_entry_custom">Özel</string>
     <string name="highlights_messages_title">Belli şablonlara göre bildirimler oluşturup mesajları öne çıkarır.</string>
     <string name="highlights_users_title">Belli kullanıcılardan bildirimler oluşturup mesajlar öne çıkarır.</string>
@@ -690,6 +754,8 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="ignores_users_title">Belli kullanıcılardan gelen mesajları yok say.</string>
     <string name="ignores_twitch_title">Engellenen Twitch kullanıcılarını yönet.</string>
     <string name="preference_notification_whisper_title">Fısıltılar için bildirimler oluştur</string>
+    <string name="preference_notification_profile_pictures_title">Profil resimlerini göster</string>
+    <string name="preference_notification_profile_pictures_summary">DankChat simgesi yerine kanal ve kullanıcı profil resimlerini kullan</string>
     <string name="login_outdated_title">Giriş Süresi Doldu!</string>
     <string name="login_outdated_message">Girişinizin süresi doldu ve birtakım işlevlere erişimi yok. Lütfen yeniden giriş yapın.</string>
     <string name="custom_user_display_title">Özel Kullanıcı Görünümü</string>
@@ -710,6 +776,9 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="message_more_actions">Daha fazlası…</string>
     <string name="message_jump_to">Mesaja git</string>
     <string name="message_pin">Mesajı sabitle</string>
+    <string name="message_warn">Uyar</string>
+    <string name="message_warn_reason">Sebep</string>
+    <string name="message_warn_confirm">Uyar</string>
     <string name="message_not_in_history">Mesaj artık sohbet geçmişinde değil</string>
     <string name="message_history">Mesaj geçmişi</string>
     <string name="global_history_title">Genel geçmiş</string>
@@ -901,6 +970,8 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="cmd_fail_ban">Kullanıcı yasaklanamadı - %1$s</string>
     <string name="cmd_usage_unban">Kullanım: %1$s &lt;kullanıcı adı&gt; - Bir kullanıcının yasağını kaldırır.</string>
     <string name="cmd_fail_unban">Kullanıcının yasağı kaldırılamadı - %1$s</string>
+    <string name="cmd_usage_warn">Kullanım: %1$s &lt;kullanıcı adı&gt; &lt;sebep&gt; - Bir kullanıcıyı uyar. Sebep zorunludur ve hedef kullanıcıya ve diğer moderatörlere gösterilir.</string>
+    <string name="cmd_fail_warn">Kullanıcı uyarılamadı - %1$s</string>
     <string name="cmd_usage_timeout">Kullanım: %1$s &lt;kullanıcı adı&gt; [süre][zaman birimi] [sebep] - Bir kullanıcının geçici olarak sohbet etmesini engelle. Süre (isteğe bağlı, varsayılan: 10 dakika) pozitif bir tam sayı olmalıdır; zaman birimi (isteğe bağlı, varsayılan: s) s, m, h, d, w\'den biri olmalıdır; maksimum süre 2 haftadır. Sebep isteğe bağlıdır ve hedef kullanıcıya ve diğer moderatörlere gösterilir.</string>
     <string name="cmd_timeout_cannot_self">Kullanıcı yasaklanamadı - Kendinize zaman aşımı uygulayamazsınız.</string>
     <string name="cmd_timeout_cannot_broadcaster">Kullanıcı yasaklanamadı - Yayıncıya zaman aşımı uygulayamazsınız.</string>
@@ -942,6 +1013,14 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="cmd_usage_shoutout">Kullanım: %1$s &lt;kullanıcı adı&gt; - Belirtilen Twitch kullanıcısına tanıtım gönderir.</string>
     <string name="cmd_success_shoutout">%1$s kullanıcısına tanıtım gönderildi</string>
     <string name="cmd_fail_shoutout">Tanıtım gönderilemedi - %1$s</string>
+    <string name="cmd_usage_set_title">Kullanım: %1$s &lt;yayın başlığı&gt;</string>
+    <string name="cmd_success_set_title">Başlık %1$s olarak güncellendi</string>
+    <string name="cmd_fail_set_title">Başlık ayarlanamadı - %1$s</string>
+    <string name="cmd_usage_set_game">Kullanım: %1$s &lt;yayın oyunu&gt;</string>
+    <string name="cmd_game_not_found">Oyun bulunamadı.</string>
+    <string name="cmd_success_set_game">Oyun %1$s olarak güncellendi</string>
+    <string name="cmd_fail_search_game">Oyun aranamadı - %1$s</string>
+    <string name="cmd_fail_set_game">Oyun ayarlanamadı - %1$s</string>
     <string name="cmd_shield_activated">Kalkan modu etkinleştirildi.</string>
     <string name="cmd_shield_deactivated">Kalkan modu devre dışı bırakıldı.</string>
     <string name="cmd_fail_shield">Kalkan modu güncellenemedi - %1$s</string>
@@ -958,6 +1037,7 @@ Yardım için bu kılavuza bakın: https://wiki.chatterino.com/Image%20Uploader/
     <string name="cmd_error_already_banned">%1$s bu kanalda zaten yasaklı.</string>
     <string name="cmd_error_cannot_perform">%2$s üzerinde %1$s işlemini gerçekleştiremezsiniz.</string>
     <string name="cmd_error_conflicting_ban">Bu kullanıcı üzerinde çakışan bir yasaklama işlemi vardı. Lütfen tekrar deneyin.</string>
+    <string name="cmd_error_conflicting_warn">Bu kullanıcı üzerinde çakışan bir uyarı işlemi vardı. Lütfen tekrar deneyin.</string>
     <string name="cmd_error_invalid_color">Renk, Twitch\'in desteklediği renklerden biri (%1$s) veya Turbo ya da Prime\'ınız varsa hex kodu (#000000) olmalıdır.</string>
     <string name="cmd_error_commercial_not_streaming">Reklam çalıştırmak için canlı yayında olmalısınız.</string>
     <string name="cmd_error_commercial_rate_limited">Başka bir reklam çalıştırabilmek için bekleme sürenizin dolmasını beklemelisiniz.</string>

@@ -102,13 +102,9 @@ class IgnoresRepository(
                 messageIgnoreDao.addIgnores(missingDefaults)
                 logger.debug { "Ignores migration completed, added ${missingDefaults.size} entries." }
             }
-        }.getOrElse {
+        }.onFailure {
+            // Keep the user's ignores, the migration is retried on the next start
             logger.error(it) { "Failed to run ignores migration" }
-            runCatching {
-                messageIgnoreDao.deleteAllIgnores()
-                userIgnoreDao.deleteAllIgnores()
-                return@launch
-            }
         }
     }
 
@@ -140,33 +136,15 @@ class IgnoresRepository(
     suspend fun addUserBlock(
         targetUserId: UserId,
         targetUsername: UserName,
-    ) {
-        val result = helixApiClient.blockUser(targetUserId)
-        if (result.isSuccess) {
-            _twitchBlocks.update {
-                it +
-                    TwitchBlock(
-                        id = targetUserId,
-                        name = targetUsername,
-                    )
-            }
-        }
+    ): Result<Unit> = helixApiClient.blockUser(targetUserId).onSuccess {
+        _twitchBlocks.update { blocks -> blocks + TwitchBlock(id = targetUserId, name = targetUsername) }
     }
 
     suspend fun removeUserBlock(
         targetUserId: UserId,
         targetUsername: UserName,
-    ) {
-        val result = helixApiClient.unblockUser(targetUserId)
-        if (result.isSuccess) {
-            _twitchBlocks.update {
-                it -
-                    TwitchBlock(
-                        id = targetUserId,
-                        name = targetUsername,
-                    )
-            }
-        }
+    ): Result<Unit> = helixApiClient.unblockUser(targetUserId).onSuccess {
+        _twitchBlocks.update { blocks -> blocks - TwitchBlock(id = targetUserId, name = targetUsername) }
     }
 
     fun clearIgnores() = _twitchBlocks.update { emptySet() }
@@ -272,10 +250,19 @@ class IgnoresRepository(
             .isIgnoredMessageWithReplacement(message) { replacement ->
                 replacement ?: return null
                 val filteredPositions = adaptEmotePositions(replacement, emoteData.emotesWithPositions)
+                val filteredGifs =
+                    emoteData.gifsWithPositions.mapNotNull { gif ->
+                        replacement.adaptPosition(gif.position)?.let { gif.copy(position = it) }
+                    }
                 return copy(
                     message = replacement.filtered,
                     originalMessage = replacement.filtered,
-                    emoteData = emoteData.copy(message = replacement.filtered, emotesWithPositions = filteredPositions),
+                    emoteData =
+                        emoteData.copy(
+                            message = replacement.filtered,
+                            emotesWithPositions = filteredPositions,
+                            gifsWithPositions = filteredGifs,
+                        ),
                 )
             }
 
@@ -334,7 +321,7 @@ class IgnoresRepository(
 
     private data class ReplacementResult(
         val filtered: String,
-        val replacement: String,
+        val replacementLength: Int,
         val matchedRanges: List<IntRange>,
     )
 
@@ -347,9 +334,15 @@ class IgnoresRepository(
             val results = regex.findAll(message).toList()
 
             if (results.isNotEmpty()) {
-                ignoreEntity.escapedReplacement?.let { replacement ->
-                    val filtered = message.replace(regex, replacement)
-                    return onReplacement(ReplacementResult(filtered, replacement, results.map(MatchResult::range)))
+                ignoreEntity.escapedReplacement?.let { escapedReplacement ->
+                    val filtered = message.replace(regex, escapedReplacement)
+                    return onReplacement(
+                        ReplacementResult(
+                            filtered = filtered,
+                            replacementLength = ignoreEntity.replacement.orEmpty().length,
+                            matchedRanges = results.map(MatchResult::range),
+                        ),
+                    )
                 }
 
                 return onReplacement(null)
@@ -361,20 +354,20 @@ class IgnoresRepository(
         replacement: ReplacementResult,
         emotes: List<EmoteWithPositions>,
     ): List<EmoteWithPositions> = emotes.map { emoteWithPos ->
-        val adjusted =
-            emoteWithPos.positions
-                .filterNot { pos -> replacement.matchedRanges.any { match -> match in pos || pos in match } } // filter out emotes directly affected by ignore replacement
-                .map { pos ->
-                    val offset =
-                        replacement.matchedRanges
-                            .filter { it.last < pos.first } // only replacements before an emote need to be considered
-                            .sumOf { replacement.replacement.length - (it.last + 1 - it.first) } // change between original match and replacement
-                    pos.first + offset..pos.last + offset // add sum of changes to the emote position
-                }
-        emoteWithPos.copy(positions = adjusted)
+        emoteWithPos.copy(positions = emoteWithPos.positions.mapNotNull { replacement.adaptPosition(it) })
     }
 
-    private operator fun IntRange.contains(other: IntRange): Boolean = other.first >= first && other.last <= last
+    // Drops positions touched by a replacement and shifts the others by the length change of earlier replacements
+    private fun ReplacementResult.adaptPosition(position: IntRange): IntRange? {
+        if (matchedRanges.any { match -> match.first <= position.last && position.first <= match.last }) {
+            return null
+        }
+        val offset =
+            matchedRanges
+                .filter { it.last < position.first }
+                .sumOf { replacementLength - (it.last + 1 - it.first) }
+        return position.first + offset..position.last + offset
+    }
 
     companion object {
         private val DEFAULT_IGNORES =

@@ -20,6 +20,7 @@ import com.flxrs.dankchat.data.api.helix.dto.ManageAutomodMessageRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.MarkerDto
 import com.flxrs.dankchat.data.api.helix.dto.MarkerRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.ModVipDto
+import com.flxrs.dankchat.data.api.helix.dto.ModifyChannelRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.PagedDto
 import com.flxrs.dankchat.data.api.helix.dto.PinnedChatMessageDto
 import com.flxrs.dankchat.data.api.helix.dto.RaidDto
@@ -27,13 +28,16 @@ import com.flxrs.dankchat.data.api.helix.dto.SendChatMessageRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.SendChatMessageResponseDto
 import com.flxrs.dankchat.data.api.helix.dto.ShieldModeRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.ShieldModeStatusDto
+import com.flxrs.dankchat.data.api.helix.dto.StreamCategoryDto
 import com.flxrs.dankchat.data.api.helix.dto.StreamDto
 import com.flxrs.dankchat.data.api.helix.dto.UserBlockDto
 import com.flxrs.dankchat.data.api.helix.dto.UserDto
 import com.flxrs.dankchat.data.api.helix.dto.UserEmoteDto
 import com.flxrs.dankchat.data.api.helix.dto.UserFollowsDto
+import com.flxrs.dankchat.data.api.helix.dto.WarnRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.WhisperRequestDto
 import com.flxrs.dankchat.utils.extensions.decodeOrNull
+import com.flxrs.dankchat.utils.extensions.runCatchingCancellable
 import io.ktor.client.call.body
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
@@ -50,7 +54,7 @@ class HelixApiClient(
     private val helixApi: HelixApi,
     private val json: Json,
 ) {
-    suspend fun getUsersByNames(names: List<UserName>): Result<List<UserDto>> = runCatching {
+    suspend fun getUsersByNames(names: List<UserName>): Result<List<UserDto>> = runCatchingCancellable {
         names.chunked(DEFAULT_PAGE_SIZE).flatMap {
             helixApi
                 .getUsersByName(it)
@@ -60,7 +64,7 @@ class HelixApiClient(
         }
     }
 
-    suspend fun getUsersByIds(ids: List<UserId>): Result<List<UserDto>> = runCatching {
+    suspend fun getUsersByIds(ids: List<UserId>): Result<List<UserDto>> = runCatchingCancellable {
         ids.chunked(DEFAULT_PAGE_SIZE).flatMap {
             helixApi
                 .getUsersByIds(it)
@@ -82,7 +86,7 @@ class HelixApiClient(
     suspend fun getChannelFollowers(
         broadcastUserId: UserId,
         targetUserId: UserId,
-    ): Result<UserFollowsDto> = runCatching {
+    ): Result<UserFollowsDto> = runCatchingCancellable {
         helixApi
             .getChannelFollowers(broadcastUserId, targetUserId)
             .throwHelixApiErrorOnFailure()
@@ -92,7 +96,7 @@ class HelixApiClient(
     suspend fun getFollowedChannel(
         userId: UserId,
         broadcasterId: UserId,
-    ): Result<FollowedChannelDto?> = runCatching {
+    ): Result<FollowedChannelDto?> = runCatchingCancellable {
         helixApi
             .getFollowedChannels(userId, broadcasterId)
             .throwHelixApiErrorOnFailure()
@@ -101,7 +105,7 @@ class HelixApiClient(
             .firstOrNull()
     }
 
-    suspend fun getStreams(channels: List<UserName>): Result<List<StreamDto>> = runCatching {
+    suspend fun getStreams(channels: List<UserName>): Result<List<StreamDto>> = runCatchingCancellable {
         channels.chunked(DEFAULT_PAGE_SIZE).flatMap {
             helixApi
                 .getStreams(it)
@@ -111,22 +115,39 @@ class HelixApiClient(
         }
     }
 
+    suspend fun searchCategories(query: String): Result<List<StreamCategoryDto>> = runCatchingCancellable {
+        helixApi
+            .searchCategories(query)
+            .throwHelixApiErrorOnFailure()
+            .body<DataListDto<StreamCategoryDto>>()
+            .data
+    }
+
+    suspend fun patchChannel(
+        broadcasterUserId: UserId,
+        request: ModifyChannelRequestDto,
+    ): Result<Unit> = runCatchingCancellable {
+        helixApi
+            .patchChannel(broadcasterUserId, request)
+            .throwHelixApiErrorOnFailure()
+    }
+
     suspend fun getUserBlocksUnvalidated(
         userId: UserId,
         maxUserBlocksToFetch: Int = 500,
-    ): Result<List<UserBlockDto>> = runCatching {
+    ): Result<List<UserBlockDto>> = runCatchingCancellable {
         pageUntil(maxUserBlocksToFetch) { cursor ->
             helixApi.getUserBlocksUnvalidated(userId, DEFAULT_PAGE_SIZE, cursor)
         }
     }
 
-    suspend fun blockUser(targetUserId: UserId): Result<Unit> = runCatching {
+    suspend fun blockUser(targetUserId: UserId): Result<Unit> = runCatchingCancellable {
         helixApi
             .putUserBlock(targetUserId)
             .throwHelixApiErrorOnFailure()
     }
 
-    suspend fun unblockUser(targetUserId: UserId): Result<Unit> = runCatching {
+    suspend fun unblockUser(targetUserId: UserId): Result<Unit> = runCatchingCancellable {
         helixApi
             .deleteUserBlock(targetUserId)
             .throwHelixApiErrorOnFailure()
@@ -136,7 +157,7 @@ class HelixApiClient(
         broadcastUserId: UserId,
         moderatorUserId: UserId,
         request: AnnouncementRequestDto,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .postAnnouncement(broadcastUserId, moderatorUserId, request)
             .throwHelixApiErrorOnFailure()
@@ -146,7 +167,7 @@ class HelixApiClient(
         fromUserId: UserId,
         toUserId: UserId,
         request: WhisperRequestDto,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .postWhisper(fromUserId, toUserId, request)
             .throwHelixApiErrorOnFailure()
@@ -155,7 +176,7 @@ class HelixApiClient(
     suspend fun getModerators(
         broadcastUserId: UserId,
         maxModeratorsToFetch: Int = 500,
-    ): Result<List<ModVipDto>> = runCatching {
+    ): Result<List<ModVipDto>> = runCatchingCancellable {
         pageUntil(maxModeratorsToFetch) { cursor ->
             helixApi.getModerators(broadcastUserId, DEFAULT_PAGE_SIZE, cursor)
         }
@@ -164,7 +185,7 @@ class HelixApiClient(
     suspend fun postModerator(
         broadcastUserId: UserId,
         userId: UserId,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .postModerator(broadcastUserId, userId)
             .throwHelixApiErrorOnFailure()
@@ -173,7 +194,7 @@ class HelixApiClient(
     suspend fun deleteModerator(
         broadcastUserId: UserId,
         userId: UserId,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .deleteModerator(broadcastUserId, userId)
             .throwHelixApiErrorOnFailure()
@@ -182,7 +203,7 @@ class HelixApiClient(
     suspend fun getVips(
         broadcastUserId: UserId,
         maxVipsToFetch: Int = 500,
-    ): Result<List<ModVipDto>> = runCatching {
+    ): Result<List<ModVipDto>> = runCatchingCancellable {
         pageUntil(maxVipsToFetch) { cursor ->
             helixApi.getVips(broadcastUserId, DEFAULT_PAGE_SIZE, cursor)
         }
@@ -191,7 +212,7 @@ class HelixApiClient(
     suspend fun postVip(
         broadcastUserId: UserId,
         userId: UserId,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .postVip(broadcastUserId, userId)
             .throwHelixApiErrorOnFailure()
@@ -200,7 +221,7 @@ class HelixApiClient(
     suspend fun deleteVip(
         broadcastUserId: UserId,
         userId: UserId,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .deleteVip(broadcastUserId, userId)
             .throwHelixApiErrorOnFailure()
@@ -210,9 +231,19 @@ class HelixApiClient(
         broadcastUserId: UserId,
         moderatorUserId: UserId,
         requestDto: BanRequestDto,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .postBan(broadcastUserId, moderatorUserId, requestDto)
+            .throwHelixApiErrorOnFailure()
+    }
+
+    suspend fun postWarning(
+        broadcastUserId: UserId,
+        moderatorUserId: UserId,
+        requestDto: WarnRequestDto,
+    ): Result<Unit> = runCatchingCancellable {
+        helixApi
+            .postWarning(broadcastUserId, moderatorUserId, requestDto)
             .throwHelixApiErrorOnFailure()
     }
 
@@ -220,7 +251,7 @@ class HelixApiClient(
         broadcastUserId: UserId,
         moderatorUserId: UserId,
         targetUserId: UserId,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .deleteBan(broadcastUserId, moderatorUserId, targetUserId)
             .throwHelixApiErrorOnFailure()
@@ -230,7 +261,7 @@ class HelixApiClient(
         broadcastUserId: UserId,
         moderatorUserId: UserId,
         messageId: String? = null,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .deleteMessages(broadcastUserId, moderatorUserId, messageId)
             .throwHelixApiErrorOnFailure()
@@ -239,20 +270,20 @@ class HelixApiClient(
     suspend fun putUserChatColor(
         targetUserId: UserId,
         color: String,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .putUserChatColor(targetUserId, color)
             .throwHelixApiErrorOnFailure()
     }
 
-    suspend fun postMarker(requestDto: MarkerRequestDto): Result<MarkerDto> = runCatching {
+    suspend fun postMarker(requestDto: MarkerRequestDto): Result<MarkerDto> = runCatchingCancellable {
         helixApi
             .postMarker(requestDto)
             .throwHelixApiErrorOnFailure()
             .firstEntryOrThrow<MarkerDto>()
     }
 
-    suspend fun postCommercial(request: CommercialRequestDto): Result<CommercialDto> = runCatching {
+    suspend fun postCommercial(request: CommercialRequestDto): Result<CommercialDto> = runCatchingCancellable {
         helixApi
             .postCommercial(request)
             .throwHelixApiErrorOnFailure()
@@ -262,14 +293,14 @@ class HelixApiClient(
     suspend fun postRaid(
         broadcastUserId: UserId,
         targetUserId: UserId,
-    ): Result<RaidDto> = runCatching {
+    ): Result<RaidDto> = runCatchingCancellable {
         helixApi
             .postRaid(broadcastUserId, targetUserId)
             .throwHelixApiErrorOnFailure()
             .firstEntryOrThrow<RaidDto>()
     }
 
-    suspend fun deleteRaid(broadcastUserId: UserId): Result<Unit> = runCatching {
+    suspend fun deleteRaid(broadcastUserId: UserId): Result<Unit> = runCatchingCancellable {
         helixApi
             .deleteRaid(broadcastUserId)
             .throwHelixApiErrorOnFailure()
@@ -279,14 +310,14 @@ class HelixApiClient(
         broadcastUserId: UserId,
         moderatorUserId: UserId,
         request: ChatSettingsRequestDto,
-    ): Result<ChatSettingsDto> = runCatching {
+    ): Result<ChatSettingsDto> = runCatchingCancellable {
         helixApi
             .patchChatSettings(broadcastUserId, moderatorUserId, request)
             .throwHelixApiErrorOnFailure()
             .firstEntryOrThrow<ChatSettingsDto>()
     }
 
-    suspend fun getGlobalBadges(): Result<List<BadgeSetDto>> = runCatching {
+    suspend fun getGlobalBadges(): Result<List<BadgeSetDto>> = runCatchingCancellable {
         helixApi
             .getGlobalBadges()
             .throwHelixApiErrorOnFailure()
@@ -294,7 +325,7 @@ class HelixApiClient(
             .data
     }
 
-    suspend fun getChannelBadges(broadcastUserId: UserId): Result<List<BadgeSetDto>> = runCatching {
+    suspend fun getChannelBadges(broadcastUserId: UserId): Result<List<BadgeSetDto>> = runCatchingCancellable {
         helixApi
             .getChannelBadges(broadcastUserId)
             .throwHelixApiErrorOnFailure()
@@ -302,7 +333,7 @@ class HelixApiClient(
             .data
     }
 
-    suspend fun getCheermotes(broadcasterId: UserId): Result<List<CheermoteSetDto>> = runCatching {
+    suspend fun getCheermotes(broadcasterId: UserId): Result<List<CheermoteSetDto>> = runCatchingCancellable {
         helixApi
             .getCheermotes(broadcasterId)
             .throwHelixApiErrorOnFailure()
@@ -314,7 +345,7 @@ class HelixApiClient(
         userId: UserId,
         msgId: String,
         action: String,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .postManageAutomodMessage(ManageAutomodMessageRequestDto(userId = userId, msgId = msgId, action = action))
             .throwHelixApiErrorOnFailure()
@@ -324,7 +355,7 @@ class HelixApiClient(
         broadcastUserId: UserId,
         targetUserId: UserId,
         moderatorUserId: UserId,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .postShoutout(broadcastUserId, targetUserId, moderatorUserId)
             .throwHelixApiErrorOnFailure()
@@ -333,7 +364,7 @@ class HelixApiClient(
     suspend fun getShieldMode(
         broadcastUserId: UserId,
         moderatorUserId: UserId,
-    ): Result<ShieldModeStatusDto> = runCatching {
+    ): Result<ShieldModeStatusDto> = runCatchingCancellable {
         helixApi
             .getShieldMode(broadcastUserId, moderatorUserId)
             .throwHelixApiErrorOnFailure()
@@ -344,21 +375,21 @@ class HelixApiClient(
         broadcastUserId: UserId,
         moderatorUserId: UserId,
         request: ShieldModeRequestDto,
-    ): Result<ShieldModeStatusDto> = runCatching {
+    ): Result<ShieldModeStatusDto> = runCatchingCancellable {
         helixApi
             .putShieldMode(broadcastUserId, moderatorUserId, request)
             .throwHelixApiErrorOnFailure()
             .firstEntryOrThrow<ShieldModeStatusDto>()
     }
 
-    suspend fun postEventSubSubscription(request: EventSubSubscriptionRequestDto): Result<EventSubSubscriptionResponseListDto> = runCatching {
+    suspend fun postEventSubSubscription(request: EventSubSubscriptionRequestDto): Result<EventSubSubscriptionResponseListDto> = runCatchingCancellable {
         helixApi
             .postEventSubSubscription(request)
             .throwHelixApiErrorOnFailure()
             .body<EventSubSubscriptionResponseListDto>()
     }
 
-    suspend fun deleteEventSubSubscription(id: String): Result<Unit> = runCatching {
+    suspend fun deleteEventSubSubscription(id: String): Result<Unit> = runCatchingCancellable {
         helixApi
             .deleteEventSubSubscription(id)
             .throwHelixApiErrorOnFailure()
@@ -368,7 +399,7 @@ class HelixApiClient(
         helixApi.getUserEmotes(userId, cursor)
     }
 
-    suspend fun getChannelEmotes(broadcasterId: UserId): Result<List<ChannelEmoteDto>> = runCatching {
+    suspend fun getChannelEmotes(broadcasterId: UserId): Result<List<ChannelEmoteDto>> = runCatchingCancellable {
         helixApi
             .getChannelEmotes(broadcasterId)
             .throwHelixApiErrorOnFailure()
@@ -376,7 +407,7 @@ class HelixApiClient(
             .data
     }
 
-    suspend fun postChatMessage(request: SendChatMessageRequestDto): Result<SendChatMessageResponseDto> = runCatching {
+    suspend fun postChatMessage(request: SendChatMessageRequestDto): Result<SendChatMessageResponseDto> = runCatchingCancellable {
         helixApi
             .postChatMessage(request)
             .throwHelixApiErrorOnFailure()
@@ -386,7 +417,7 @@ class HelixApiClient(
     suspend fun getPinnedChatMessage(
         broadcastUserId: UserId,
         moderatorUserId: UserId,
-    ): Result<PinnedChatMessageDto?> = runCatching {
+    ): Result<PinnedChatMessageDto?> = runCatchingCancellable {
         helixApi
             .getPinnedChatMessage(broadcastUserId, moderatorUserId)
             .throwHelixApiErrorOnFailure()
@@ -400,7 +431,7 @@ class HelixApiClient(
         moderatorUserId: UserId,
         messageId: String,
         durationSeconds: Long?,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .putChatPin(broadcastUserId, moderatorUserId, messageId, durationSeconds)
             .throwHelixApiErrorOnFailure()
@@ -410,7 +441,7 @@ class HelixApiClient(
         broadcastUserId: UserId,
         moderatorUserId: UserId,
         messageId: String,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runCatchingCancellable {
         helixApi
             .deleteChatPin(broadcastUserId, moderatorUserId, messageId)
             .throwHelixApiErrorOnFailure()
@@ -502,6 +533,10 @@ class HelixApiClient(
                             HelixError.TargetCannotBeBanned
                         }
 
+                        message.startsWith(USER_MAY_NOT_BE_WARNED_ERROR, ignoreCase = true) -> {
+                            HelixError.TargetCannotBeWarned
+                        }
+
                         message.startsWith(USER_NOT_BANNED_ERROR, ignoreCase = true) -> {
                             HelixError.TargetNotBanned
                         }
@@ -566,7 +601,7 @@ class HelixApiClient(
                 HttpStatusCode.NotFound -> {
                     when (request.url.encodedPath) {
                         "/helix/streams/markers" -> HelixError.MarkerError(message.substringAfter("message:\"", "").substringBeforeLast('"').ifBlank { null })
-                        "helix/raids" -> HelixError.NoRaidPending
+                        "/helix/raids" -> HelixError.NoRaidPending
                         else -> HelixError.Forwarded
                     }
                 }
@@ -590,7 +625,8 @@ class HelixApiClient(
 
                 HttpStatusCode.Conflict -> {
                     when (request.url.encodedPath) {
-                        "helix/moderation/bans" -> HelixError.ConflictingBanOperation
+                        "/helix/moderation/bans" -> HelixError.ConflictingBanOperation
+                        "/helix/moderation/warnings" -> HelixError.ConflictingWarnOperation
                         else -> HelixError.Forwarded
                     }
                 }
@@ -620,6 +656,7 @@ class HelixApiClient(
         private const val USER_NOT_BANNED_ERROR = "The user in the user_id query parameter is not banned"
         private const val USER_ALREADY_BANNED_ERROR = "The user specified in the user_id field is already banned"
         private const val USER_MAY_NOT_BE_BANNED_ERROR = "The user specified in the user_id field may not be banned"
+        private const val USER_MAY_NOT_BE_WARNED_ERROR = "The user specified in the user_id field may not be warned"
         private const val INVALID_COLOR_ERROR = "invalid color"
         private const val BROADCASTER_NOT_LIVE_ERROR = "To start a commercial, the broadcaster must be streaming live."
         private const val MISSING_REQUIRED_PARAM_ERROR = "Missing required parameter"

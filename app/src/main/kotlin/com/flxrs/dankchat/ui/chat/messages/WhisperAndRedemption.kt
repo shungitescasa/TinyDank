@@ -1,6 +1,7 @@
 package com.flxrs.dankchat.ui.chat.messages
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -27,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -38,7 +40,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import coil3.compose.LocalPlatformContext
 import com.flxrs.dankchat.data.UserName
 import com.flxrs.dankchat.ui.chat.BadgeUi
 import com.flxrs.dankchat.ui.chat.ChatMessageUiState
@@ -47,7 +48,6 @@ import com.flxrs.dankchat.ui.chat.messages.common.MessageTextWithInlineContent
 import com.flxrs.dankchat.ui.chat.messages.common.appendInlineSpacer
 import com.flxrs.dankchat.ui.chat.messages.common.appendWithLinks
 import com.flxrs.dankchat.ui.chat.messages.common.isSpacerId
-import com.flxrs.dankchat.ui.chat.messages.common.launchCustomTab
 import com.flxrs.dankchat.ui.chat.messages.common.parseUserAnnotation
 import com.flxrs.dankchat.ui.chat.messages.common.rememberAdaptiveLinkColor
 import com.flxrs.dankchat.ui.chat.messages.common.rememberAdaptiveTextColor
@@ -67,8 +67,8 @@ fun WhisperMessageComposable(
     onMessageLongClick: (messageId: String, fullMessage: String) -> Unit,
     onEmoteClick: (emotes: List<EmoteSheetData>) -> Unit,
     modifier: Modifier = Modifier,
-    animateGifs: Boolean = true,
     onWhisperReply: ((userName: UserName) -> Unit)? = null,
+    onTap: (() -> Unit)? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val backgroundColor = rememberBackgroundColor(message.lightBackgroundColor, message.darkBackgroundColor)
@@ -81,18 +81,28 @@ fun WhisperMessageComposable(
                 .wrapContentHeight()
                 .alpha(message.textAlpha)
                 .background(backgroundColor)
-                .indication(interactionSource, ripple())
+                .then(
+                    if (onTap != null) {
+                        Modifier.clickable(
+                            interactionSource = interactionSource,
+                            indication = null,
+                            onClick = onTap,
+                        )
+                    } else {
+                        Modifier
+                    },
+                ).indication(interactionSource, ripple())
                 .padding(horizontal = 6.dp, vertical = 3.dp),
     ) {
         Box(modifier = Modifier.weight(1f)) {
             WhisperMessageText(
                 message = message,
                 fontSize = fontSize,
-                animateGifs = animateGifs,
                 backgroundColor = backgroundColor,
                 onUserClick = onUserClick,
                 onMessageLongClick = onMessageLongClick,
                 onEmoteClick = onEmoteClick,
+                onTap = onTap,
             )
         }
         if (onWhisperReply != null) {
@@ -115,22 +125,23 @@ fun WhisperMessageComposable(
 private fun WhisperMessageText(
     message: ChatMessageUiState.WhisperMessageUi,
     fontSize: Float,
-    animateGifs: Boolean,
     backgroundColor: Color,
     onUserClick: (userId: String?, userName: String, displayName: String, badges: List<BadgeUi>, isLongPress: Boolean) -> Unit,
     onMessageLongClick: (messageId: String, fullMessage: String) -> Unit,
     onEmoteClick: (emotes: List<EmoteSheetData>) -> Unit,
+    onTap: (() -> Unit)?,
 ) {
-    val context = LocalPlatformContext.current
+    val uriHandler = LocalUriHandler.current
     val defaultTextColor = rememberAdaptiveTextColor(backgroundColor)
     val senderColor = rememberNormalizedColor(message.rawSenderColor, backgroundColor)
     val recipientColor = rememberNormalizedColor(message.rawRecipientColor, backgroundColor)
     val linkColor = rememberAdaptiveLinkColor(backgroundColor)
 
     // Build annotated string with text content
-    val annotatedString =
+    val (annotatedString, messageStart) =
         remember(message, defaultTextColor, senderColor, recipientColor, linkColor) {
-            buildAnnotatedString {
+            var messageStart = 0
+            val text = buildAnnotatedString {
                 // Timestamp
                 if (message.timestamp.isNotEmpty()) {
                     withStyle(timestampSpanStyle(fontSize, defaultTextColor)) {
@@ -153,7 +164,7 @@ private fun WhisperMessageText(
                     ),
                 ) {
                     pushStringAnnotation(
-                        tag = "USER",
+                        tag = SENDER_ANNOTATION_TAG,
                         annotation = "${message.userId.value}|${message.userName.value}|${message.displayName.value}",
                     )
                     append(message.senderName)
@@ -170,13 +181,19 @@ private fun WhisperMessageText(
                         color = recipientColor,
                     ),
                 ) {
+                    pushStringAnnotation(
+                        tag = RECIPIENT_ANNOTATION_TAG,
+                        annotation = "${message.recipientId?.value.orEmpty()}|${message.recipientUserName.value}|${message.recipientDisplayName.value}",
+                    )
                     append(message.recipientName)
+                    pop()
                 }
                 withStyle(SpanStyle(color = defaultTextColor)) {
                     append(": ")
                 }
 
                 // Message text with emotes
+                messageStart = length
                 withStyle(SpanStyle(color = defaultTextColor)) {
                     var currentPos = 0
                     message.emotes.sortedBy { it.position.first }.forEach { emote ->
@@ -205,6 +222,7 @@ private fun WhisperMessageText(
                     }
                 }
             }
+            text to messageStart
         }
 
     MessageTextWithInlineContent(
@@ -212,26 +230,38 @@ private fun WhisperMessageText(
         badges = message.badges,
         emotes = message.emotes,
         fontSize = fontSize,
-        animateGifs = animateGifs,
+        asciiArtStart = messageStart.takeIf { message.isAsciiArt },
         onEmoteClick = onEmoteClick,
+        onBackgroundClick = { onTap?.invoke() },
         onTextClick = { offset ->
-            val user = annotatedString.getStringAnnotations("USER", offset, offset).firstOrNull()
+            val sender = annotatedString.getStringAnnotations(SENDER_ANNOTATION_TAG, offset, offset).firstOrNull()
+            val recipient = annotatedString.getStringAnnotations(RECIPIENT_ANNOTATION_TAG, offset, offset).firstOrNull()
             val url = annotatedString.getStringAnnotations("URL", offset, offset).firstOrNull()
-
             when {
-                user != null -> parseUserAnnotation(user.item)?.let {
+                sender != null -> parseUserAnnotation(sender.item)?.let {
                     onUserClick(it.userId, it.userName, it.displayName, message.badges, false)
                 }
 
-                url != null -> launchCustomTab(context, url.item)
+                recipient != null -> parseUserAnnotation(recipient.item)?.let {
+                    onUserClick(it.userId, it.userName, it.displayName, emptyList(), false)
+                }
+
+                url != null -> uriHandler.openUri(url.item)
+
+                else -> onTap?.invoke()
             }
         },
         onTextLongClick = { offset ->
-            val user = annotatedString.getStringAnnotations("USER", offset, offset).firstOrNull()
+            val sender = annotatedString.getStringAnnotations(SENDER_ANNOTATION_TAG, offset, offset).firstOrNull()
+            val recipient = annotatedString.getStringAnnotations(RECIPIENT_ANNOTATION_TAG, offset, offset).firstOrNull()
 
             when {
-                user != null -> parseUserAnnotation(user.item)?.let {
+                sender != null -> parseUserAnnotation(sender.item)?.let {
                     onUserClick(it.userId, it.userName, it.displayName, message.badges, true)
+                }
+
+                recipient != null -> parseUserAnnotation(recipient.item)?.let {
+                    onUserClick(it.userId, it.userName, it.displayName, emptyList(), true)
                 }
 
                 else -> onMessageLongClick(message.id, message.fullMessage)
@@ -356,3 +386,5 @@ fun PointRedemptionMessageComposable(
 
 private const val INLINE_CONTENT_TAG = "androidx.compose.foundation.text.inlineContent"
 private const val REWARD_COST_ID = "REWARD_COST"
+private const val SENDER_ANNOTATION_TAG = "WHISPER_SENDER"
+private const val RECIPIENT_ANNOTATION_TAG = "WHISPER_RECIPIENT"

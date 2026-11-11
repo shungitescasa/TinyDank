@@ -1,5 +1,6 @@
 package com.flxrs.dankchat.data.repo.emote
 
+import com.flxrs.dankchat.data.api.bttv.dto.BTTVGlobalEmoteDto
 import com.flxrs.dankchat.data.api.helix.HelixApiClient
 import com.flxrs.dankchat.data.irc.IrcMessage
 import com.flxrs.dankchat.data.repo.channel.ChannelRepository
@@ -12,12 +13,16 @@ import com.flxrs.dankchat.data.twitch.emote.ChatMessageEmoteType
 import com.flxrs.dankchat.data.twitch.message.EmoteWithPositions
 import com.flxrs.dankchat.data.twitch.message.Message
 import com.flxrs.dankchat.data.twitch.message.PrivMessage
+import com.flxrs.dankchat.data.twitch.message.TwitchGif
 import com.flxrs.dankchat.di.DispatchersProvider
 import com.flxrs.dankchat.preferences.chat.ChatSettingsDataStore
+import io.mockk.every
 import io.mockk.impl.annotations.InjectMockKs
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import kotlin.test.assertEquals
@@ -238,6 +243,77 @@ internal class EmoteRepositoryTest {
     }
 
     @Test
+    fun `emote positions are correct with collapsed spaces before and an emoji space after the emote`() = runBlocking {
+        // Collapsing the 9 double spaces moves Kappa from 27 to 18, the space inserted before "x" at 26 lies in between
+        val message = gifMessage(text = "a  b  c  d  e  f  g  h  i  Kappa \uD83C\uDF53x", gifs = "", emotes = "25:27-31")
+
+        val parsed = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(message))
+
+        val emote = parsed.emotes.single()
+        assertEquals(expected = "a b c d e f g h i Kappa \uD83C\uDF53 x", actual = parsed.message)
+        assertEquals(expected = 18..23, actual = emote.position)
+        assertEquals(expected = "Kappa", actual = emote.code)
+    }
+
+    @Test
+    fun `emote positions are correct after a collapsed double space in a real message`() = runBlocking {
+        val message = assertIs<PrivMessage>(Message.parse(IrcMessage.parse(REAL_DOUBLE_SPACE_MESSAGE)) { null })
+
+        val parsed = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(message))
+
+        assertEquals(expected = 31, actual = parsed.emotes.size)
+        parsed.emotes.forEach { emote ->
+            assertEquals(expected = "forsenE", actual = parsed.message.substring(emote.position.first, emote.position.last))
+        }
+    }
+
+    @Test
+    fun `twitch emote urls are built from the emote id for every position`() {
+        val emotes = listOf(EmoteWithPositions(id = "25", positions = listOf(0..4, 6..10)), EmoteWithPositions(id = "emotesv2_abc", positions = listOf(12..16)))
+        val result = emoteRepository.parseTwitchEmotes(
+            emotesWithPositions = emotes,
+            message = "Kappa Kappa Keepo",
+            supplementaryCodePointPositions = emptyList(),
+            appendedSpaces = emptyList(),
+            removedSpaces = emptyList(),
+            replyMentionOffset = 0,
+        )
+
+        assertEquals(
+            expected = listOf(
+                "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/3.0",
+                "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/3.0",
+                "https://static-cdn.jtvnw.net/emoticons/v2/emotesv2_abc/default/dark/3.0",
+            ),
+            actual = result.map { it.url },
+        )
+        assertEquals(
+            expected = listOf(
+                "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0",
+                "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0",
+                "https://static-cdn.jtvnw.net/emoticons/v2/emotesv2_abc/default/dark/2.0",
+            ),
+            actual = result.map { it.lowResUrl },
+        )
+    }
+
+    @Test
+    fun `third-party emotes follow their own lists and not the twitch emotes`() = runBlocking {
+        every { dispatchersProvider.default } returns Dispatchers.Unconfined
+        val channel = "forsen".toUserName()
+        val text = "FeelsDankMan monkaS"
+
+        emoteRepository.setBTTVGlobalEmotes(listOf(BTTVGlobalEmoteDto(id = "1", code = "FeelsDankMan")))
+        assertEquals(expected = listOf("FeelsDankMan"), actual = emoteRepository.parse3rdPartyEmotes(text, channel).map { it.code })
+
+        emoteRepository.clearTwitchEmotes()
+        assertEquals(expected = listOf("FeelsDankMan"), actual = emoteRepository.parse3rdPartyEmotes(text, channel).map { it.code })
+
+        emoteRepository.setBTTVGlobalEmotes(listOf(BTTVGlobalEmoteDto(id = "2", code = "monkaS")))
+        assertEquals(expected = listOf("monkaS"), actual = emoteRepository.parse3rdPartyEmotes(text, channel).map { it.code })
+    }
+
+    @Test
     fun `reply with emote between emojis`() {
         // Original: "@user 👍🏽 Kappa ⚡" — "@user " = 6, stripped: "👍🏽 Kappa ⚡"
         // Twitch codepoints (full): 👍=6, 🏽=7, ' '=8, K=9..a=13, ' '=14, ⚡=15
@@ -329,5 +405,128 @@ internal class EmoteRepositoryTest {
         val campaignBadge = assertIs<Badge.ChannelBadge>(parsed.badges.single())
         assertEquals(expected = "FeelsDankMan", actual = campaignBadge.title)
         assertEquals(expected = "4x", actual = campaignBadge.url)
+    }
+
+    @Test
+    fun `dankchat badge resolves from the badges response`() = runBlocking {
+        emoteRepository.setDankChatBadges(Json.decodeFromString(DANKCHAT_BADGES_JSON))
+
+        val parsed = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(messageFromUser(userId = "73697410")))
+
+        val badge = assertIs<Badge.DankChatBadge>(parsed.badges.single())
+        assertEquals(expected = "DankChat Developer", actual = badge.title)
+        assertEquals(expected = "https://api.dank.chat/badges/gold.png", actual = badge.url)
+    }
+
+    @Test
+    fun `users without a known dankchat badge get none`() = runBlocking {
+        emoteRepository.setDankChatBadges(Json.decodeFromString(DANKCHAT_BADGES_JSON))
+
+        val unknownBadge = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(messageFromUser(userId = "222")))
+        val unlisted = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(messageFromUser(userId = "333")))
+
+        assertEquals(expected = emptyList(), actual = unknownBadge.badges)
+        assertEquals(expected = emptyList(), actual = unlisted.badges)
+    }
+
+    @Test
+    fun `gif positions survive message normalisation and emote reparsing`() = runBlocking {
+        val message = gifMessage(text = "a  [GIF]", gifs = "3-7|gif-id|https://example.com/a.gif")
+
+        val parsed = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(message))
+        val reparsed = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(parsed))
+
+        assertEquals("a [GIF]", parsed.message)
+        assertEquals(TwitchGif("gif-id", "https://example.com/a.gif", "[GIF]", 2..6), parsed.gifs.single())
+        assertEquals(parsed.gifs, reparsed.gifs)
+    }
+
+    @Test
+    fun `gif positions account for emoji before and inside the gif text`() = runBlocking {
+        val message = gifMessage(text = "\uD83D\uDE00 [Y A Y \uD83D\uDE00 GIF]", gifs = "2-14|gif-id|https://example.com/a.gif")
+
+        val parsed = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(message))
+
+        val gif = parsed.gifs.single()
+        assertEquals(3..16, gif.position)
+        assertEquals("[Y A Y \uD83D\uDE00 GIF]", gif.altText)
+    }
+
+    @Test
+    fun `gif positions account for spaces appended after emoji and collapsed whitespace inside the gif text`() = runBlocking {
+        val appended = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(gifMessage(text = "\uD83D\uDE00[GIF]", gifs = "1-5|a|https://example.com/a.gif")))
+        val collapsed = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(gifMessage(text = "[A  B] x", gifs = "0-5|b|https://example.com/b.gif")))
+
+        assertEquals("\uD83D\uDE00 [GIF]", appended.message)
+        assertEquals(3..7, appended.gifs.single().position)
+        assertEquals("[A B] x", collapsed.message)
+        assertEquals("[A B]", collapsed.gifs.single().altText)
+    }
+
+    @Test
+    fun `gif positions account for the stripped reply mention`() = runBlocking {
+        val message = gifMessage(text = "@Pajlada [GIF]", gifs = "9-13|gif-id|https://example.com/a.gif")
+        val stripped = message.copy(message = "[GIF]", originalMessage = "[GIF]", replyMentionOffset = 9, emoteData = message.emoteData.copy(message = "[GIF]"))
+
+        val parsed = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(stripped))
+
+        assertEquals(0..4, parsed.gifs.single().position)
+    }
+
+    @Test
+    fun `emotes inside a gif text and overlapping gifs are dropped`() = runBlocking {
+        val message = gifMessage(text = "[Kappa] x", gifs = "0-6|first|https://example.com/a.gif,2-8|second|https://example.com/b.gif", emotes = "25:1-5")
+
+        val parsed = assertIs<PrivMessage>(emoteRepository.parseEmotesAndBadges(message))
+
+        assertEquals(emptyList(), parsed.emotes)
+        assertEquals("first", parsed.gifs.single().id)
+    }
+
+    @Test
+    fun `overlay emotes before a gif shift its position`() {
+        val message = "FeelsDankMan cvHazmat [GIF]"
+        val emotes =
+            listOf(
+                ChatMessageEmote(position = 0..12, url = "asd", id = "1", code = "FeelsDankMan", scale = 1, type = ChatMessageEmoteType.TwitchEmote),
+                ChatMessageEmote(position = 13..21, url = "asd", id = "1", code = "cvHazmat", scale = 1, type = ChatMessageEmoteType.TwitchEmote, isOverlayEmote = true),
+            )
+
+        val result = emoteRepository.adjustOverlayEmotes(message, emotes, gifPositions = listOf(22..27))
+
+        assertEquals("FeelsDankMan [GIF]", result.message)
+        assertEquals(listOf(13..18), result.gifPositions)
+    }
+
+    private fun gifMessage(
+        text: String,
+        gifs: String,
+        emotes: String = "",
+    ): PrivMessage {
+        val raw =
+            "@badge-info=;badges=;color=#F1C40F;display-name=Forsen;emotes=$emotes;gifs=$gifs;id=gif-message;room-id=1;user-id=2 :forsen!forsen@forsen.tmi.twitch.tv PRIVMSG #forsen :$text"
+        return assertIs<PrivMessage>(Message.parse(IrcMessage.parse(raw)) { null })
+    }
+
+    private fun messageFromUser(userId: String): PrivMessage {
+        val raw =
+            "@badge-info=;badges=;color=#00BCD4;display-name=Chatter;emotes=;id=badge-message;room-id=1;user-id=$userId :chatter!chatter@chatter.tmi.twitch.tv PRIVMSG #forsen :hi chat"
+        return assertIs<PrivMessage>(Message.parse(IrcMessage.parse(raw)) { null })
+    }
+
+    companion object {
+        // Captured from #forsen via recent-messages, Twitch kept the double space after ">dart"
+        private val REAL_DOUBLE_SPACE_MESSAGE =
+            "@room-id=22484632;flags;historical=1;user-type;badges=subscriber/6,bloom-badge/4;id=c821bbf9-0ee3-4a6b-bfcd-13cf2fa08ece;" +
+                "emotes=521050:7-13,15-21,23-29,31-37,39-45,47-53,55-61,63-69,71-77,79-85,87-93,95-101,103-109,111-117,119-125,127-133," +
+                "135-141,143-149,151-157,159-165,167-173,175-181,183-189,191-197,199-205,207-213,215-221,223-229,231-237,239-245,247-253;" +
+                "turbo=0;first-msg=0;display-name=imfakeris1_;badge-info=subscriber/7;mod=0;user-id=1364989612;subscriber=1;" +
+                "tmi-sent-ts=1792923272791;returning-chatter=0;rm-received-ts=1792923272954;color=#FF69B4 " +
+                ":imfakeris1_!imfakeris1_@imfakeris1_.tmi.twitch.tv PRIVMSG #forsen :>dart  " + "forsenE ".repeat(30) + "forsenE"
+
+        private const val DANKCHAT_BADGES_JSON =
+            """{"badges":[{"id":"developer","title":"DankChat Developer","url":"https://api.dank.chat/badges/gold.png"},""" +
+                """{"id":"supporter","title":"DankChat Supporter","url":"https://api.dank.chat/badges/dank.png"}],""" +
+                """"users":{"111":"supporter","222":"removed","73697410":"developer"}}"""
     }
 }

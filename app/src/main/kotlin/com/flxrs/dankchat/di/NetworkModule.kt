@@ -1,6 +1,7 @@
 package com.flxrs.dankchat.di
 
 import com.flxrs.dankchat.BuildConfig
+import com.flxrs.dankchat.data.api.SKIP_HTTP_LOGGING
 import com.flxrs.dankchat.data.api.auth.AuthApi
 import com.flxrs.dankchat.data.api.badges.BadgesApi
 import com.flxrs.dankchat.data.api.bttv.BTTVApi
@@ -20,7 +21,6 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.UserAgent
-import io.ktor.client.plugins.cache.HttpCache
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.plugins.logging.LogLevel
@@ -43,6 +43,9 @@ import kotlin.time.toJavaDuration
 
 const val UPLOAD_OKHTTP_CLIENT = "UploadOkHttpClient"
 
+// Channel loads send several requests per channel to the same host at once
+private const val API_MAX_REQUESTS_PER_HOST = 16
+
 private val okhttpLogger = KotlinLogging.logger("OkHttp")
 
 @Module
@@ -51,7 +54,7 @@ class NetworkModule {
         const val SUPIBOT_BASE_URL = "https://supinic.com/api/"
         const val HELIX_BASE_URL = "https://api.twitch.tv/helix/"
         const val AUTH_BASE_URL = "https://id.twitch.tv/oauth2/"
-        const val DANKCHAT_BASE_URL = "https://flxrs.com/api/"
+        const val DANKCHAT_BASE_URL = "https://api.dank.chat/v1/"
         const val BADGES_BASE_URL = "https://badges.twitch.tv/v1/badges/"
         const val FFZ_BASE_URL = "https://api.frankerfacez.com/v1/"
         const val BTTV_BASE_URL = "https://api.betterttv.net/3/cached/"
@@ -95,8 +98,8 @@ class NetworkModule {
                             httpLogger.trace { message }
                         }
                     }
+                filter { request -> !request.attributes.contains(SKIP_HTTP_LOGGING) }
             }
-            install(HttpCache)
             install(UserAgent) {
                 agent = "dankchat/${BuildConfig.VERSION_NAME}"
             }
@@ -121,12 +124,18 @@ class NetworkModule {
     )
 
     @Single
-    fun provideDankChatApi(ktorClient: HttpClient) = DankChatApi(
+    fun provideDankChatApi(
+        ktorClient: HttpClient,
+        authDataStore: AuthDataStore,
+        startupValidationHolder: StartupValidationHolder,
+    ) = DankChatApi(
         ktorClient.config {
             defaultRequest {
                 url(DANKCHAT_BASE_URL)
             }
         },
+        authDataStore,
+        startupValidationHolder,
     )
 
     @Single
@@ -238,5 +247,5 @@ private fun createSafeOkHttpDispatcher(): Dispatcher {
             }
         }
     }
-    return Dispatcher(executor)
+    return Dispatcher(executor).apply { maxRequestsPerHost = API_MAX_REQUESTS_PER_HOST }
 }

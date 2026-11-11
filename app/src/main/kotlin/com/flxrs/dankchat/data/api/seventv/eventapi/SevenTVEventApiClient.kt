@@ -31,6 +31,7 @@ import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -54,6 +55,7 @@ import kotlin.time.TimeSource
 
 private val logger = KotlinLogging.logger("SevenTVEventApiClient")
 
+@OptIn(DelicateCoroutinesApi::class)
 @Single
 class SevenTVEventApiClient(
     httpClient: HttpClient,
@@ -305,7 +307,7 @@ class SevenTVEventApiClient(
                         logger.info { "[7TV Event-Api] attempting to reconnect #$retryCount.." }
                         val reconnectDelay = RECONNECT_BASE_DELAY * (1 shl (retryCount - 1))
                         delay(reconnectDelay + randomJitter())
-                        retryCount = (retryCount + 1).coerceAtMost(RECONNECT_MAX_ATTEMPTS)
+                        retryCount = (retryCount + 1).coerceAtMost(RECONNECT_MAX_BACKOFF_STEPS)
                     }
                 }
             }
@@ -321,7 +323,7 @@ class SevenTVEventApiClient(
 
     private fun randomJitter() = Random.nextLong(range = 0L..MAX_JITTER).milliseconds
 
-    private fun DispatchMessage.handleMessage() {
+    private suspend fun DispatchMessage.handleMessage() {
         when (d) {
             is EmoteSetDispatchData -> {
                 with(d.body) {
@@ -342,17 +344,15 @@ class SevenTVEventApiClient(
                             val oldData = it.oldValue ?: return@mapNotNull null
                             SevenTVEventMessage.EmoteSetUpdated.UpdatedEmote(newData.id, newData.name, oldData.name)
                         }
-                    scope.launch {
-                        _messages.emit(
-                            SevenTVEventMessage.EmoteSetUpdated(
-                                emoteSetId = emoteSetId,
-                                actorName = actorName,
-                                added = added.orEmpty(),
-                                removed = removed.orEmpty(),
-                                updated = updated.orEmpty(),
-                            ),
-                        )
-                    }
+                    _messages.emit(
+                        SevenTVEventMessage.EmoteSetUpdated(
+                            emoteSetId = emoteSetId,
+                            actorName = actorName,
+                            added = added.orEmpty(),
+                            removed = removed.orEmpty(),
+                            updated = updated.orEmpty(),
+                        ),
+                    )
                 }
             }
 
@@ -361,17 +361,15 @@ class SevenTVEventApiClient(
                     val actorName = actor.displayName
                     updated?.forEach { change ->
                         val index = change.index
-                        val emoteSetChange = change.value?.filterIsInstance<EmoteSetChangeField>()?.firstOrNull() ?: return
-                        scope.launch {
-                            _messages.emit(
-                                SevenTVEventMessage.UserUpdated(
-                                    actorName = actorName,
-                                    connectionIndex = index,
-                                    emoteSetId = emoteSetChange.value.id,
-                                    oldEmoteSetId = emoteSetChange.oldValue.id,
-                                ),
-                            )
-                        }
+                        val emoteSetChange = change.value?.filterIsInstance<EmoteSetChangeField>()?.firstOrNull() ?: return@forEach
+                        _messages.emit(
+                            SevenTVEventMessage.UserUpdated(
+                                actorName = actorName,
+                                connectionIndex = index,
+                                emoteSetId = emoteSetChange.value.id,
+                                oldEmoteSetId = emoteSetChange.oldValue.id,
+                            ),
+                        )
                     }
                 }
             }
@@ -391,7 +389,7 @@ class SevenTVEventApiClient(
         private const val EVENT_API_URL = "wss://events.7tv.io/v3"
         private const val MAX_JITTER = 250L
         private val RECONNECT_BASE_DELAY = 1.seconds
-        private const val RECONNECT_MAX_ATTEMPTS = 6
+        private const val RECONNECT_MAX_BACKOFF_STEPS = 6
         private val FLOW_DEBOUNCE = 2.seconds
     }
 }

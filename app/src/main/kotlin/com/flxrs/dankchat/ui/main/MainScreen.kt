@@ -1,5 +1,6 @@
 package com.flxrs.dankchat.ui.main
 
+import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -23,7 +25,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -38,27 +40,32 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.coerceIn
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
+import androidx.compose.ui.unit.takeOrElse
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.window.core.layout.WindowSizeClass
 import com.flxrs.dankchat.R
 import com.flxrs.dankchat.data.UserName
 import com.flxrs.dankchat.preferences.DankChatPreferenceStore
 import com.flxrs.dankchat.preferences.appearance.InputAction
+import com.flxrs.dankchat.ui.chat.ChannelViewModelStores
+import com.flxrs.dankchat.ui.chat.ChatScrollStates
 import com.flxrs.dankchat.ui.chat.FabMenuCallbacks
 import com.flxrs.dankchat.ui.chat.PinnedMessageUiState
 import com.flxrs.dankchat.ui.chat.PinnedMessageViewModel
@@ -69,7 +76,6 @@ import com.flxrs.dankchat.ui.chat.emote.LocalEmoteAnimationCoordinator
 import com.flxrs.dankchat.ui.chat.history.HistoryChannel
 import com.flxrs.dankchat.ui.chat.mention.MentionViewModel
 import com.flxrs.dankchat.ui.chat.message.MessageOptionsViewModel
-import com.flxrs.dankchat.ui.chat.messages.common.launchCustomTab
 import com.flxrs.dankchat.ui.chat.user.UserPopupViewModel
 import com.flxrs.dankchat.ui.main.channel.ChannelManagementViewModel
 import com.flxrs.dankchat.ui.main.channel.ChannelPagerUiState
@@ -78,14 +84,17 @@ import com.flxrs.dankchat.ui.main.channel.ChannelTabViewModel
 import com.flxrs.dankchat.ui.main.dialog.DialogStateViewModel
 import com.flxrs.dankchat.ui.main.dialog.MainScreenDialogs
 import com.flxrs.dankchat.ui.main.dialog.ModActionsViewModel
+import com.flxrs.dankchat.ui.main.dialog.UploadAction
 import com.flxrs.dankchat.ui.main.input.ChatBottomBar
 import com.flxrs.dankchat.ui.main.input.ChatInputCallbacks
 import com.flxrs.dankchat.ui.main.input.ChatInputViewModel
+import com.flxrs.dankchat.ui.main.input.InputActionsState
 import com.flxrs.dankchat.ui.main.input.InputOverlay
 import com.flxrs.dankchat.ui.main.input.SuggestionDropdown
 import com.flxrs.dankchat.ui.main.input.TourOverlayState
 import com.flxrs.dankchat.ui.main.sheet.FullScreenSheetOverlay
 import com.flxrs.dankchat.ui.main.sheet.FullScreenSheetState
+import com.flxrs.dankchat.ui.main.sheet.FullScreenSheetUiStates
 import com.flxrs.dankchat.ui.main.sheet.SheetNavigationViewModel
 import com.flxrs.dankchat.ui.main.stream.StreamView
 import com.flxrs.dankchat.ui.main.stream.StreamViewModel
@@ -94,6 +103,7 @@ import com.flxrs.dankchat.ui.tour.FeatureTourViewModel
 import com.flxrs.dankchat.ui.tour.PostOnboardingStep
 import com.flxrs.dankchat.ui.tour.TourStep
 import com.flxrs.dankchat.utils.compose.rememberRoundedCornerBottomPadding
+import com.flxrs.dankchat.utils.compose.rememberTTSVoiceDataCheck
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableMap
@@ -101,12 +111,16 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
+import kotlin.math.abs
 
 private val ROUNDED_CORNER_THRESHOLD = 8.dp
 private const val QUICK_SWITCH_HEIGHT_FRACTION = 0.5f
+private const val PAGE_MOVING_THRESHOLD = 0.01f
+private const val IME_OPEN_TIMEOUT_MS = 500L
 
 // Per-layout parameters for the movable stream content
 internal data class StreamViewConfig(
@@ -117,6 +131,7 @@ internal data class StreamViewConfig(
     val isTheaterChatVisible: Boolean = false,
     val canDockTheaterChat: Boolean = false,
     val overlayEndPadding: Dp = 0.dp,
+    val webViewHorizontalInset: Dp = 0.dp,
 )
 
 @Suppress("ModifierNotUsedAtRoot")
@@ -164,9 +179,16 @@ fun MainScreen(
     var composePagerStateRef by remember { mutableStateOf<PagerState?>(null) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     val mainState by mainScreenViewModel.uiState.collectAsStateWithLifecycle()
+    val enableTTS = rememberTTSVoiceDataCheck { mainScreenViewModel.setTTSEnabled(true) }
+    val toggleTTS = {
+        when {
+            mainState.isTTSEnabled -> mainScreenViewModel.setTTSEnabled(false)
+            else -> enableTTS()
+        }
+    }
 
     val ime = WindowInsets.ime
     val navBars = WindowInsets.navigationBars
@@ -189,15 +211,31 @@ fun MainScreen(
         mainScreenViewModel.trackKeyboardHeight(targetImeHeight, isLandscape, minKeyboardHeightPx)
     }
 
-    // Close emote menu when keyboard opens, but wait for keyboard to reach
-    // persisted height so scaffold padding doesn't jump during the transition
-    LaunchedEffect(isImeVisible) {
-        if (isImeVisible) {
-            if (keyboardHeightPx > 0) {
-                snapshotFlow { imeHeightState.value }
-                    .first { it >= keyboardHeightPx }
+    // Close emote menu when keyboard opens, but wait for the keyboard to reach the height it is opening to
+    // so scaffold padding doesn't jump during the transition. Keyboards that report no height time out instead,
+    // and a window that is resized for the keyboard has no transition to wait for
+    val targetImeHeightState = rememberUpdatedState(targetImeHeight)
+    // Height the keyboard had while it was open, still needed once it starts closing
+    val lastOpenImeHeight = remember { mutableIntStateOf(0) }
+    SideEffect(targetImeHeight) {
+        if (targetImeHeight > 0) {
+            lastOpenImeHeight.intValue = targetImeHeight
+        }
+    }
+    val isWindowResizedForIme by rememberIsWindowResizedForIme()
+    LaunchedEffect(isImeVisible, isWindowResizedForIme) {
+        when {
+            isWindowResizedForIme -> {
+                chatInputViewModel.setEmoteMenuOpen(false)
             }
-            chatInputViewModel.setEmoteMenuOpen(false)
+
+            isImeVisible -> {
+                withTimeoutOrNull(IME_OPEN_TIMEOUT_MS) {
+                    snapshotFlow { targetImeHeightState.value > 0 && imeHeightState.value >= targetImeHeightState.value }
+                        .first { it }
+                }
+                chatInputViewModel.setEmoteMenuOpen(false)
+            }
         }
     }
 
@@ -213,20 +251,24 @@ fun MainScreen(
     val isTheaterMode = streamVmState.isTheaterMode
     val streamState = rememberStreamToolbarState(currentStream)
 
-    // PiP state — observe via lifecycle since onPause fires when entering PiP
     val isInPipMode = observePipMode(streamViewModel)
 
-    // Wide split layout: side-by-side stream + chat on medium+ width windows
-    val windowSizeClass = currentWindowAdaptiveInfo().windowSizeClass
+    // Wide split layout: side-by-side stream + chat on medium+ width landscape windows,
+    // portrait windows like unfolded foldables stack a full width stream above the chat
+    val windowSizeClass = currentWindowAdaptiveInfoV2().windowSizeClass
     val isWideWindow =
-        windowSizeClass.isWidthAtLeastBreakpoint(
-            WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND,
-        )
+        isLandscape &&
+            windowSizeClass.isWidthAtLeastBreakpoint(
+                WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND,
+            )
+    // Large screens and multi-window ignore orientation requests, so theater fills the window in either orientation there
+    val isOrientationLocked =
+        configuration.smallestScreenWidthDp >= WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND || observeMultiWindowMode()
     // Follows the window, so neither the split layout nor a portrait shaped theater can flash
     val isTheaterRequested = isTheaterMode || streamVmState.isTheaterRotationSuspended
     val theaterStream =
         when {
-            isTheaterRequested && isLandscape && !isInPipMode -> currentStream
+            isTheaterRequested && (isLandscape || isOrientationLocked) && !isInPipMode -> currentStream
             else -> null
         }
     val useTheaterLayout = theaterStream != null
@@ -234,6 +276,8 @@ fun MainScreen(
 
     // Registered before the emote menu handler, so an open emote menu closes first
     BackHandler(enabled = useTheaterLayout) { streamViewModel.exitTheaterMode() }
+    // Same registration order, a hidden input stays hidden since that is a saved choice
+    BackHandler(enabled = mainState.isFullscreen && !useTheaterLayout) { mainScreenViewModel.exitFullscreen() }
 
     // Only intercept when menu is visible AND keyboard is fully GONE,
     // so system keyboard close gestures are not intercepted
@@ -280,6 +324,25 @@ fun MainScreen(
         sheetsReady = true
     }
 
+    val jumpToMessage: (String, UserName) -> Boolean = { messageId, channel ->
+        val target = channelPagerViewModel.resolveJumpTarget(channel, messageId)
+        if (target != null) {
+            scrollTargets[target.channel] = target.messageId
+            scope.launch { composePagerStateRef?.scrollToPage(target.channelIndex) }
+        }
+        target != null
+    }
+
+    // Replying from outside the channel jumps there first, which needs the message to still be repliable
+    val replyToMessage: (String, UserName, UserName, String) -> Unit = { messageId, channel, userName, message ->
+        if (channelPagerViewModel.canReplyTo(channel, messageId) && jumpToMessage(messageId, channel)) {
+            sheetNavigationViewModel.closeFullScreenSheet()
+            // The input view model can still see the closing sheet, which shows the input by itself
+            mainScreenViewModel.showInput()
+            chatInputViewModel.startReply(messageId, userName, message)
+        }
+    }
+
     MainScreenEventHandler(
         snackbarHostState = snackbarHostState,
         mainEventBus = mainEventBus,
@@ -289,23 +352,19 @@ fun MainScreen(
         sheetNavigationViewModel = sheetNavigationViewModel,
         mainScreenViewModel = mainScreenViewModel,
         preferenceStore = preferenceStore,
+        onJumpToMessage = jumpToMessage,
     )
 
     val tabState = channelTabViewModel.uiState.collectAsStateWithLifecycle().value
     val activeChannel = tabState.tabs.getOrNull(tabState.selectedIndex)?.channel
+    val channelNotificationsEnabled by channelManagementViewModel.activeChannelNotificationsEnabled.collectAsStateWithLifecycle()
 
-    // The theater chat shows the streamed channel, so the input has to target it as well
-    SideEffect(theaterStream, activeChannel) {
-        if (theaterStream != null && theaterStream != activeChannel) {
-            channelTabViewModel.selectTab(preferenceStore.channels.indexOf(theaterStream))
-        }
-    }
-
-    // Same key as in ChatComposable, so this resolves the active page's instance
+    // Same per-channel store as in ChatComposable, so this resolves the active page's instance
+    val channelViewModelStores: ChannelViewModelStores = koinViewModel()
     val activePinnedMessageViewModel =
         activeChannel?.let { channel ->
             koinViewModel<PinnedMessageViewModel>(
-                key = "pinned-${channel.value}",
+                viewModelStoreOwner = channelViewModelStores.ownerFor(channel),
                 parameters = { parametersOf(channel) },
             )
         }
@@ -324,38 +383,55 @@ fun MainScreen(
         channelsEmpty = tabState.tabs.isEmpty() && !tabState.loading,
     )
 
+    // Resolved at call time so a confirmed disclaimer uses the current Activity's launchers
+    val startUpload: (UploadAction) -> Unit = { action ->
+        when (action) {
+            UploadAction.CaptureImage -> onCaptureImage()
+            UploadAction.CaptureVideo -> onCaptureVideo()
+            UploadAction.ChooseMedia -> onChooseMedia()
+        }
+    }
+    val requestUpload: (UploadAction) -> Unit = { action ->
+        when {
+            preferenceStore.hasExternalHostingAcknowledged -> startUpload(action)
+            else -> dialogViewModel.setPendingUploadAction(action)
+        }
+    }
+
     MainScreenDialogs(
         dialogViewModel = dialogViewModel,
         isLoggedIn = isLoggedIn,
         activeChannel = activeChannel,
-        isStreamActive = currentStream != null,
         inputSheetState = inputSheetState,
         sheetsReady = sheetsReady,
-        onAddChannel = {
-            channelManagementViewModel.addChannel(it)
+        onAddChannels = {
+            channelManagementViewModel.addChannels(it)
             dialogViewModel.dismissAddChannel()
         },
         onLogout = onLogout,
         onLogin = onLogin,
         onOpenUrl = onOpenUrl,
+        onUploadAction = startUpload,
         onOpenLogViewer = onOpenLogViewer,
         onJumpToMessage = { messageId, channel ->
-            val target = channelPagerViewModel.resolveJumpTarget(channel, messageId)
-            if (target != null) {
+            if (jumpToMessage(messageId, channel)) {
                 messageOptionsViewModel.dismiss()
                 sheetNavigationViewModel.closeFullScreenSheet()
-                scrollTargets[target.channel] = target.messageId
-                scope.launch { composePagerStateRef?.scrollToPage(target.channelIndex) }
             } else {
                 scope.launch {
                     snackbarHostState.showSnackbar(messageNotInHistoryMsg)
                 }
             }
         },
+        onReplyToMessage = replyToMessage,
     )
 
     val isFullscreen = mainState.isFullscreen
-    val showInput = mainState.showInput
+    // Sheets with their own send target always show the input, the stored choice applies again once they close
+    val isInputSheet = fullScreenSheetState is FullScreenSheetState.Replies ||
+        fullScreenSheetState is FullScreenSheetState.Mention ||
+        fullScreenSheetState is FullScreenSheetState.Whisper
+    val showInput = mainState.showInput || isInputSheet
     val swipeNavigation = mainState.swipeNavigation
     val effectiveShowAppBar = mainState.effectiveShowAppBar
 
@@ -372,22 +448,13 @@ fun MainScreen(
     val swipeDownThresholdPx = with(density) { (if (inputState.isCompactMode) 24.dp else 56.dp).toPx() }
 
     FullscreenSystemBarsEffect(isFullscreen || useTheaterLayout)
-    TheaterOrientationEffect(isTheaterMode)
+    TheaterOrientationEffect(isTheaterMode && !isOrientationLocked)
     TheaterRotationEffect(
-        isTheaterMode = isTheaterMode,
-        isRotationSuspended = streamVmState.isTheaterRotationSuspended,
+        isTheaterMode = isTheaterMode && !isOrientationLocked,
+        isRotationSuspended = streamVmState.isTheaterRotationSuspended && !isOrientationLocked,
         onSuspendTheater = { streamViewModel.suspendTheaterForRotation() },
         onResumeTheater = { streamViewModel.resumeTheaterFromRotation() },
     )
-
-    val isInputSheet = fullScreenSheetState is FullScreenSheetState.Replies ||
-        fullScreenSheetState is FullScreenSheetState.Mention ||
-        fullScreenSheetState is FullScreenSheetState.Whisper
-    SideEffect(isInputSheet) {
-        if (isInputSheet && !showInput) {
-            mainScreenViewModel.toggleInput()
-        }
-    }
 
     val pagerState by channelPagerViewModel.uiState.collectAsStateWithLifecycle()
 
@@ -396,15 +463,33 @@ fun MainScreen(
             initialPage = pagerState.currentPage,
             pageCount = { pagerState.channels.size },
         ).also { composePagerStateRef = it }
+    val chatScrollStates = rememberSaveable(saver = ChatScrollStates.Saver) { ChatScrollStates() }
+    val sheetUiStates = rememberSaveable(saver = FullScreenSheetUiStates.Saver) { FullScreenSheetUiStates() }
+    // Removed channels start at the newest messages when added again, an empty list while loading keeps restored positions
+    SideEffect(pagerState.channels) {
+        if (pagerState.channels.isNotEmpty()) {
+            chatScrollStates.retain(pagerState.channels.map { it.value }.toSet())
+        }
+    }
     var inputHeightPx by remember { mutableIntStateOf(0) }
+    var singleLineInputHeightPx by remember { mutableIntStateOf(0) }
     var helperTextHeightPx by remember { mutableIntStateOf(0) }
     var inputOverflowExpanded by remember { mutableStateOf(false) }
     var recentMessagesExpanded by remember { mutableStateOf(false) }
     var isInputMultiline by remember { mutableStateOf(false) }
+    var isInputFocused by remember { mutableStateOf(false) }
     var toolbarBottomPx by remember { mutableIntStateOf(0) }
-    if (!showInput) inputHeightPx = 0
+    if (!showInput) {
+        inputHeightPx = 0
+        singleLineInputHeightPx = 0
+        isInputFocused = false
+        // A popup that stays expanded keeps its dismiss scrim over the chat
+        inputOverflowExpanded = false
+        recentMessagesExpanded = false
+    }
     if (showInput || inputState.helperText.isEmpty) helperTextHeightPx = 0
     val inputHeightDp = with(density) { inputHeightPx.toDp() }
+    val singleLineInputHeightDp = with(density) { singleLineInputHeightPx.toDp() }
     val helperTextHeightDp = with(density) { helperTextHeightPx.toDp() }
     val toolbarBottomDp = with(density) { toolbarBottomPx.toDp() }
     val bottomReserveDp = with(density) {
@@ -413,7 +498,7 @@ fun MainScreen(
 
     val focusManager = LocalFocusManager.current
     MainScreenFocusEffects(
-        imeHeight = imeHeightState,
+        imeHeight = { imeHeightState.value },
         isEmoteMenuOpen = inputState.isEmoteMenuOpen,
         currentStream = currentStream,
     )
@@ -427,27 +512,43 @@ fun MainScreen(
     )
 
     val emoteCoordinator: EmoteAnimationCoordinator = koinInject()
-    val customTabContext = LocalContext.current
-    val customTabUriHandler =
-        remember(customTabContext) {
-            object : UriHandler {
-                override fun openUri(uri: String) {
-                    launchCustomTab(customTabContext, uri)
+    LifecycleStartEffect(emoteCoordinator) {
+        emoteCoordinator.setAnimationsPaused(false)
+        onStopOrDispose { emoteCoordinator.setAnimationsPaused(true) }
+    }
+    // Only the stacked layout keeps the stream height up to date
+    val chatLinkUriHandler =
+        rememberChatLinkUriHandler(
+            streamViewModel = streamViewModel,
+            streamBottom = {
+                when {
+                    useTheaterLayout || useWideSplitLayout -> 0.dp
+                    else -> streamState.heightDp
                 }
-            }
-        }
+            },
+        )
 
     CompositionLocalProvider(
         LocalEmoteAnimationCoordinator provides emoteCoordinator,
-        LocalUriHandler provides customTabUriHandler,
+        LocalUriHandler provides chatLinkUriHandler,
     ) {
         var containerWidthPx by remember { mutableIntStateOf(0) }
         var containerHeightPx by remember { mutableIntStateOf(0) }
         val containerHeightDp = with(density) { containerHeightPx.toDp() }
-        // Docked theater chat gets whatever width remains next to a full-height 16:9 stream,
-        // so the mode only exists on screens where that remainder is usable
-        val theaterDockedChatWidth = with(density) { (containerWidthPx - containerHeightPx * (16f / 9f)).toDp() }
-        val canDockTheaterChat = theaterDockedChatWidth >= MIN_DOCKED_THEATER_CHAT_WIDTH
+        // Docked theater chat defaults to whatever width remains next to a full-height 16:9 stream,
+        // or a middle ground where that remainder is too narrow. Resizing it replaces the default.
+        var resizedTheaterChatWidth by remember { mutableStateOf(streamViewModel.dockedTheaterChatWidth?.dp ?: Dp.Unspecified) }
+        val maxDockedTheaterChatWidth = with(density) { (containerWidthPx / 2).toDp() }
+        val canDockTheaterChat = maxDockedTheaterChatWidth >= MIN_DOCKED_THEATER_CHAT_WIDTH
+        val theaterDockedChatWidth =
+            resizedTheaterChatWidth
+                .takeOrElse {
+                    val remainingWidth = with(density) { (containerWidthPx - containerHeightPx * (16f / 9f)).toDp() }
+                    when {
+                        remainingWidth >= MIN_DOCKED_THEATER_CHAT_WIDTH -> remainingWidth
+                        else -> DEFAULT_DOCKED_THEATER_CHAT_WIDTH
+                    }
+                }.coerceIn(MIN_DOCKED_THEATER_CHAT_WIDTH, max(MIN_DOCKED_THEATER_CHAT_WIDTH, maxDockedTheaterChatWidth))
         val menuMaxHeightDp =
             (containerHeightDp - toolbarBottomDp - inputHeightDp - bottomReserveDp - 8.dp)
                 .coerceAtLeast(0.dp)
@@ -490,8 +591,21 @@ fun MainScreen(
             // dialog owns it. Resolved in the layout phase to avoid per-frame recomposition.
             val hasDialogWithInput = dialogState.showAddChannel || modActionsActive || dialogState.showManageChannels || dialogState.showNewWhisper
             val emoteMenuPadding = if (inputState.isEmoteMenuOpen) targetMenuHeight else 0.dp
-            val scaffoldBottomInsets = remember(ime, navBars, hasDialogWithInput, emoteMenuPadding) {
-                val emoteMenuInsets = WindowInsets(bottom = emoteMenuPadding)
+            val emoteMenuInsets = remember(inputState.isEmoteMenuOpen, targetMenuHeight, hasDialogWithInput) {
+                EmoteMenuInsets(
+                    isOpen = inputState.isEmoteMenuOpen,
+                    menuHeight = targetMenuHeight,
+                    imeHeight = { imeHeightState.value },
+                    fullImeHeight = {
+                        when {
+                            hasDialogWithInput -> 0
+                            targetImeHeightState.value > 0 -> targetImeHeightState.value
+                            else -> lastOpenImeHeight.intValue
+                        }
+                    },
+                )
+            }
+            val scaffoldBottomInsets = remember(ime, navBars, hasDialogWithInput, emoteMenuInsets) {
                 when {
                     hasDialogWithInput -> emoteMenuInsets
                     else -> ime.exclude(navBars).union(emoteMenuInsets)
@@ -526,7 +640,7 @@ fun MainScreen(
                             onEncryptionClick = { chatInputViewModel.toggleEncryption() },
                             onOverlayDismiss = {
                                 when (inputState.overlay) {
-                                    is InputOverlay.Reply -> chatInputViewModel.setReplying(false)
+                                    is InputOverlay.Reply -> chatInputViewModel.cancelReply()
                                     is InputOverlay.Whisper -> chatInputViewModel.setWhisperTarget(null)
                                     is InputOverlay.Announce -> chatInputViewModel.setAnnouncing(false)
                                     InputOverlay.None -> Unit
@@ -545,6 +659,7 @@ fun MainScreen(
                             },
                             onAudioOnly = { streamViewModel.toggleAudioOnly() },
                             onToggleTheater = { streamViewModel.toggleTheaterMode() },
+                            onToggleTTS = toggleTTS,
                             onModActions = { inputState.activeChannel?.let { modActionsViewModel.show(it) } },
                             onInputActionsChange = mainScreenViewModel::updateInputActions,
                             onSearchClick = { activeChannel?.let { sheetNavigationViewModel.openHistory(HistoryChannel.Channel(it)) } },
@@ -557,10 +672,13 @@ fun MainScreen(
                                 },
                             onRepeatedSendChange = chatInputViewModel::setRepeatedSend,
                             onInputMultilineChanged = { isInputMultiline = it },
+                            onInputFocusChanged = { isInputFocused = it },
+                            onTabComplete = chatInputViewModel::applyFirstSuggestion,
                         ),
                     isUploading = dialogState.isUploading,
                     isLoading = tabState.loading,
                     isFullscreen = isFullscreen,
+                    isTTSEnabled = mainState.isTTSEnabled,
                     isModerator = mainScreenViewModel.isModeratorInChannel(inputState.activeChannel),
                     isStreamActive = currentStream != null,
                     isAudioOnly = isAudioOnly,
@@ -592,7 +710,12 @@ fun MainScreen(
                                 }
                             }
                         },
-                    onInputHeightChange = { inputHeightPx = it },
+                    onInputHeightChange = { height ->
+                        inputHeightPx = height
+                        if (!isInputMultiline) {
+                            singleLineInputHeightPx = height
+                        }
+                    },
                     debugMode = mainState.debugMode,
                     overflowExpanded = inputOverflowExpanded,
                     onOverflowExpandedChange = {
@@ -618,7 +741,7 @@ fun MainScreen(
                     isRepeatedSendEnabled = mainState.isRepeatedSendEnabled,
                     overflowMenuMaxHeightDp = menuMaxHeightDp,
                     tourState =
-                        remember(featureTourState.currentTourStep, featureTourState.forceOverflowOpen, featureTourState.isTourActive) {
+                        remember(featureTourState.currentTourStep, featureTourState.forceOverflowOpen, featureTourState.isTourActive, featureTourState.postOnboardingStep) {
                             TourOverlayState(
                                 inputActionsTooltipState = if (featureTourState.currentTourStep == TourStep.InputActions) featureTourViewModel.inputActionsTooltipState else null,
                                 overflowMenuTooltipState = if (featureTourState.currentTourStep == TourStep.OverflowMenu) featureTourViewModel.overflowMenuTooltipState else null,
@@ -648,7 +771,7 @@ fun MainScreen(
                     }
 
                     ToolbarAction.AddChannel -> {
-                        featureTourViewModel.onAddedChannelFromToolbar()
+                        featureTourViewModel.onToolbarHintDone()
                         dialogViewModel.showAddChannel()
                     }
 
@@ -689,16 +812,20 @@ fun MainScreen(
                         dialogViewModel.showBlockChannel()
                     }
 
+                    ToolbarAction.ToggleChannelNotifications -> {
+                        activeChannel?.let { channelManagementViewModel.toggleChannelNotifications(it) }
+                    }
+
                     ToolbarAction.CaptureImage -> {
-                        if (preferenceStore.hasExternalHostingAcknowledged) onCaptureImage() else dialogViewModel.setPendingUploadAction(onCaptureImage)
+                        requestUpload(UploadAction.CaptureImage)
                     }
 
                     ToolbarAction.CaptureVideo -> {
-                        if (preferenceStore.hasExternalHostingAcknowledged) onCaptureVideo() else dialogViewModel.setPendingUploadAction(onCaptureVideo)
+                        requestUpload(UploadAction.CaptureVideo)
                     }
 
                     ToolbarAction.ChooseMedia -> {
-                        if (preferenceStore.hasExternalHostingAcknowledged) onChooseMedia() else dialogViewModel.setPendingUploadAction(onChooseMedia)
+                        requestUpload(UploadAction.ChooseMedia)
                     }
 
                     ToolbarAction.ReloadEmotes -> {
@@ -734,13 +861,15 @@ fun MainScreen(
                     totalMentionCount = tabState.tabs.sumOf { it.mentionCount } + tabState.whisperMentionCount,
                     hasActivePinnedMessage = activePinnedMessageState != PinnedMessageUiState.Hidden,
                     isPinnedMessageShown = activePinnedMessageState is PinnedMessageUiState.Expanded,
+                    channelNotificationsEnabled = channelNotificationsEnabled,
                     onAction = handleToolbarAction,
                     onAudioOnly = { streamViewModel.toggleAudioOnly() },
                     onStreamClose = { streamViewModel.closeStream() },
                     endAligned = endAligned,
                     showTabs = showTabs,
                     addChannelTooltipState = if (featureTourState.postOnboardingStep is PostOnboardingStep.ToolbarPlusHint) featureTourViewModel.addChannelTooltipState else null,
-                    onAddChannelTooltipDismiss = featureTourViewModel::onToolbarHintDismissed,
+                    onAddChannelTooltipShow = featureTourViewModel::onToolbarHintShown,
+                    onAddChannelTooltipDismiss = featureTourViewModel::onToolbarHintDone,
                     onSkipTour = featureTourViewModel::skipTour,
                     menuMaxHeightDp = menuMaxHeightDp,
                     quickSwitchMaxHeightDp = quickSwitchMaxHeightDp,
@@ -754,9 +883,11 @@ fun MainScreen(
             }
 
             // Shared emote menu layer
+            val emoteMenuOpensBehindKeyboard = remember(inputState.isEmoteMenuOpen) { isImeVisible }
             val emoteMenuLayer: @Composable (Modifier) -> Unit = { menuModifier ->
                 EmoteMenuOverlay(
                     isVisible = inputState.isEmoteMenuOpen,
+                    opensBehindKeyboard = emoteMenuOpensBehindKeyboard,
                     totalMenuHeight = totalMenuHeight,
                     backProgress = backProgress,
                     onEmoteClick = { code, id ->
@@ -764,7 +895,8 @@ fun MainScreen(
                         chatInputViewModel.addEmoteUsage(id)
                     },
                     onBackspace = chatInputViewModel::deleteLastWord,
-                    modifier = menuModifier,
+                    // Stays attached to the input while a keyboard of another height opens or closes
+                    modifier = menuModifier.offset { IntOffset(x = 0, y = emoteMenuInsets.displacement(this)) },
                 )
             }
 
@@ -773,9 +905,8 @@ fun MainScreen(
                 remember {
                     ChatPagerCallbacks(
                         onOpenReplies = sheetNavigationViewModel::openReplies,
-                        onRecover = {
-                            mainScreenViewModel.recoverInputAndFullscreen()
-                        },
+                        onShowInput = mainScreenViewModel::showInput,
+                        onExitFullscreen = mainScreenViewModel::exitFullscreen,
                         onScrollToBottom = { mainScreenViewModel.setGestureToolbarHidden(false) },
                         onTourAdvance = featureTourViewModel::advance,
                         onTourSkip = featureTourViewModel::skipTour,
@@ -825,6 +956,10 @@ fun MainScreen(
                                 chatInputViewModel.setEmoteMenuOpen(false)
                             }
 
+                            InputAction.TTS -> {
+                                toggleTTS()
+                            }
+
                             InputAction.Debug -> {
                                 sheetNavigationViewModel.openDebugInfo()
                             }
@@ -835,18 +970,35 @@ fun MainScreen(
                         }
                     }
                 }
+            // Shared by all channels, so switching channels keeps the menu open or closed
+            var fabMenuExpanded by remember { mutableStateOf(false) }
+            // The menu leaves with the hidden input, its dismiss scrim must not stay behind
+            if (showInput) {
+                fabMenuExpanded = false
+            }
             val fabMenuCallbacks =
                 FabMenuCallbacks(
                     onAction = fabActionHandler,
                     onAudioOnly = { streamViewModel.toggleAudioOnly() },
-                    isStreamActive = currentStream != null,
+                    actionState =
+                        InputActionsState(
+                            isInputShown = showInput,
+                            enabled = inputState.enabled,
+                            hasLastMessage = inputState.hasLastMessage,
+                            isStreamActive = currentStream != null,
+                            hasStreamData = hasStreamData,
+                            isFullscreen = isFullscreen,
+                            isTTSEnabled = mainState.isTTSEnabled,
+                            isTheaterMode = useTheaterLayout,
+                            isModerator = mainScreenViewModel.isModeratorInChannel(inputState.activeChannel),
+                            isEncryptionEnabled = inputState.isEncryptionEnabled,
+                            encryptOnSend = inputState.encryptOnSend,
+                            debugMode = mainState.debugMode,
+                        ),
+                    pinnedActions = mainState.inputActions,
                     isAudioOnly = isAudioOnly,
-                    hasStreamData = hasStreamData,
-                    isFullscreen = isFullscreen,
-                    isModerator = mainScreenViewModel.isModeratorInChannel(inputState.activeChannel),
-                    debugMode = mainState.debugMode,
-                    enabled = inputState.enabled,
-                    hasLastMessage = inputState.hasLastMessage,
+                    menuExpanded = fabMenuExpanded,
+                    onMenuExpandedChange = { fabMenuExpanded = it },
                 )
 
             val scaffoldContent: @Composable (PaddingValues, Dp, Boolean) -> Unit = { paddingValues, chatTopPadding, toolbarVisible ->
@@ -856,6 +1008,7 @@ fun MainScreen(
                     tabState = tabState,
                     composePagerState = composePagerState,
                     pagerState = pagerState,
+                    chatScrollStates = chatScrollStates,
                     isLoggedIn = isLoggedIn,
                     showInput = showInput,
                     isFullscreen = isFullscreen,
@@ -894,25 +1047,35 @@ fun MainScreen(
                 FullScreenSheetOverlay(
                     sheetState = fullScreenSheetState,
                     mentionViewModel = mentionViewModel,
+                    uiStates = sheetUiStates,
                     onDismiss = sheetNavigationViewModel::closeFullScreenSheet,
                     onDismissReplies = {
                         sheetNavigationViewModel.closeFullScreenSheet()
-                        chatInputViewModel.setReplying(false)
+                        chatInputViewModel.cancelReply()
                     },
                     onWhisperReply = chatInputViewModel::setWhisperTarget,
+                    onReplyToMessage = { message ->
+                        message.channel?.let { channel -> replyToMessage(message.messageId, channel, message.userName, message.message) }
+                    },
                     bottomContentPadding = effectiveBottomPadding,
                 )
             }
 
-            // Collected inside the slot so suggestion updates only recompose the dropdown
+            // Collected inside the slot so suggestion updates only recompose the dropdown.
+            // Gated on focus because floating and hardware keyboards report no ime insets
+            val animateEmotes = inputState.animateEmotes
+            val isEmoteMenuOpen = inputState.isEmoteMenuOpen
             val suggestionDropdown: @Composable (Modifier) -> Unit = { dropdownModifier ->
-                val suggestions by chatInputViewModel.suggestions.collectAsStateWithLifecycle()
-                SuggestionDropdown(
-                    suggestions = suggestions,
-                    onSuggestionClick = chatInputViewModel::applySuggestion,
-                    availableMaxHeightDp = menuMaxHeightDp,
-                    modifier = dropdownModifier,
-                )
+                if (isInputFocused && !isEmoteMenuOpen) {
+                    val suggestions by chatInputViewModel.suggestions.collectAsStateWithLifecycle()
+                    SuggestionDropdown(
+                        suggestions = suggestions,
+                        animateEmotes = animateEmotes,
+                        onSuggestionClick = chatInputViewModel::applySuggestion,
+                        availableMaxHeightDp = menuMaxHeightDp,
+                        modifier = dropdownModifier,
+                    )
+                }
             }
 
             val onStreamClose = {
@@ -988,6 +1151,7 @@ fun MainScreen(
                             isTheaterMode = config.isTheaterMode,
                             isTheaterChatVisible = config.isTheaterChatVisible,
                             overlayEndPadding = config.overlayEndPadding,
+                            webViewHorizontalInset = config.webViewHorizontalInset,
                             onClose = onStreamClose,
                             onAudioOnly = onAudioOnly,
                             onToggleTheater = streamViewModel::toggleTheaterMode,
@@ -1007,10 +1171,16 @@ fun MainScreen(
             if (theaterStream != null) {
                 TheaterLayout(
                     currentStream = theaterStream,
+                    chatScrollState = chatScrollStates.forKey(theaterStream.value),
                     isChatVisible = streamVmState.isTheaterChatVisible,
                     isChatDocked = streamVmState.isTheaterChatDocked,
                     dockedChatWidth = theaterDockedChatWidth,
+                    maxDockedChatWidth = maxDockedTheaterChatWidth,
                     canDockChat = canDockTheaterChat,
+                    onDockedChatWidthChange = { width ->
+                        resizedTheaterChatWidth = width
+                        streamViewModel.setDockedTheaterChatWidth(width.value)
+                    },
                     onToggleChatMode = { streamViewModel.toggleTheaterChatMode() },
                     onChatPanelWidthChange = { theaterChatPanelWidthPx.floatValue = it },
                     showInput = showInput,
@@ -1027,7 +1197,7 @@ fun MainScreen(
                     onChatDragEnd = onTheaterChatDragEnd,
                     onHideInput = { mainScreenViewModel.hideInput() },
                     onOpenReplies = sheetNavigationViewModel::openReplies,
-                    onRecover = { mainScreenViewModel.recoverInputAndFullscreen() },
+                    onShowInput = { mainScreenViewModel.recoverInputAndFullscreen() },
                     streamView = streamView,
                     bottomBar = bottomBar,
                     emoteMenuLayer = emoteMenuLayer,
@@ -1085,6 +1255,7 @@ fun MainScreen(
                     scaffoldBottomInsets = scaffoldBottomInsets,
                     scaffoldBottomTargetDp = scaffoldBottomTargetDp,
                     inputHeightDp = inputHeightDp,
+                    singleLineInputHeightDp = singleLineInputHeightDp,
                     isFullscreen = isFullscreen,
                     gestureToolbarHidden = mainState.gestureToolbarHidden,
                     isKeyboardVisible = isKeyboardVisible,
@@ -1094,6 +1265,7 @@ fun MainScreen(
                     containerWidthPx = containerWidthPx,
                     containerHeightPx = containerHeightPx,
                     fontSize = mainState.fontSize,
+                    keepStreamWhileTyping = mainState.keepStreamWhileTyping,
                     showInput = showInput,
                     inputPopupExpanded = inputOverflowExpanded || recentMessagesExpanded,
                     forceOverflowOpen = featureTourState.forceOverflowOpen,
@@ -1120,19 +1292,26 @@ private fun MainScreenPagerEffects(
     onClearNotifications: (Int) -> Unit,
     onShowToolbar: () -> Unit,
 ) {
-    // Sync Compose pager with ViewModel state
+    // The ViewModel owns the active page, the pager follows it
+    var isFollowingViewModel by remember { mutableStateOf(false) }
     LaunchedEffect(pagerState.currentPage, pagerState.channels.size) {
         if (!composePagerState.isScrollInProgress &&
             composePagerState.currentPage != pagerState.currentPage &&
             pagerState.currentPage in 0 until composePagerState.pageCount
         ) {
-            composePagerState.scrollToPage(pagerState.currentPage)
+            isFollowingViewModel = true
+            try {
+                composePagerState.scrollToPage(pagerState.currentPage)
+            } finally {
+                isFollowingViewModel = false
+            }
         }
     }
 
-    // Eagerly update active channel on page change for snappy UI (room state, stream info)
+    // Only swipes update the active channel, eagerly for snappy UI (room state, stream info).
+    // A restored or not yet synced page must never overwrite the ViewModel.
     SideEffect(composePagerState.currentPage) {
-        if (composePagerState.currentPage != pagerState.currentPage) {
+        if (composePagerState.isScrollInProgress && !isFollowingViewModel && composePagerState.currentPage != pagerState.currentPage) {
             onSetActivePage(composePagerState.currentPage)
         }
     }
@@ -1142,9 +1321,10 @@ private fun MainScreenPagerEffects(
         onClearNotifications(composePagerState.settledPage)
     }
 
-    // Pager swipe reveals toolbar
-    SideEffect(composePagerState.isScrollInProgress) {
-        if (composePagerState.isScrollInProgress) {
+    // Pager swipe reveals toolbar. Vertical chat scrolls can start a pager scroll that never moves the page.
+    val isPageMoving by remember { derivedStateOf { abs(composePagerState.currentPageOffsetFraction) > PAGE_MOVING_THRESHOLD } }
+    SideEffect(isPageMoving) {
+        if (isPageMoving) {
             onShowToolbar()
         }
     }
@@ -1207,23 +1387,26 @@ private fun MainScreenTourEffects(
 
 @Composable
 private fun MainScreenFocusEffects(
-    imeHeight: androidx.compose.runtime.State<Int>,
+    imeHeight: () -> Int,
     isEmoteMenuOpen: Boolean,
     currentStream: UserName?,
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val emoteMenuOpenState = rememberUpdatedState(isEmoteMenuOpen)
+    val configuration = LocalConfiguration.current
+    val hasHardwareKeyboard = rememberUpdatedState(configuration.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO)
 
     // Clear focus when keyboard fully reaches the bottom and emote menu is closed.
     // Uses rememberUpdatedState so snapshotFlow reads the latest emote menu state.
     // Debounced to avoid premature focus loss during transitions.
+    // A connecting hardware keyboard also hides the soft keyboard, typing continues in the input then.
     LaunchedEffect(Unit) {
-        snapshotFlow { imeHeight.value == 0 && !emoteMenuOpenState.value }
+        snapshotFlow { imeHeight() == 0 && !emoteMenuOpenState.value }
             .debounce(150)
             .distinctUntilChanged()
             .collect { shouldClearFocus ->
-                if (shouldClearFocus) {
+                if (shouldClearFocus && !hasHardwareKeyboard.value) {
                     focusManager.clearFocus()
                 }
             }

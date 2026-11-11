@@ -14,6 +14,7 @@ data class ChatInputCallbacks(
     val onToggleStream: () -> Unit,
     val onAudioOnly: () -> Unit,
     val onToggleTheater: () -> Unit,
+    val onToggleTTS: () -> Unit,
     val onModActions: () -> Unit,
     val onInputActionsChange: (ImmutableList<InputAction>) -> Unit,
     val onRecentMessageClick: (String) -> Unit = {},
@@ -22,4 +23,6 @@ data class ChatInputCallbacks(
     val onNewWhisper: (() -> Unit)? = null,
     val onRepeatedSendChange: (Boolean) -> Unit = {},
     val onInputMultilineChanged: (Boolean) -> Unit = {},
+    val onInputFocusChanged: (Boolean) -> Unit = {},
+    val onTabComplete: () -> Boolean = { false },
 )

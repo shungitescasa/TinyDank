@@ -123,14 +123,9 @@ class HighlightsRepository(
                 badgeHighlightDao.addHighlights(DEFAULT_BADGE_HIGHLIGHTS)
                 logger.debug { "Badge highlights migration completed" }
             }
-        }.getOrElse {
+        }.onFailure {
+            // Keep the user's highlights, the migration is retried on the next start
             logger.error(it) { "Failed to run highlights migration" }
-            runCatching {
-                messageHighlightDao.deleteAllHighlights()
-                userHighlightDao.deleteAllHighlights()
-                badgeHighlightDao.deleteAllHighlights()
-                return@launch
-            }
         }
     }
 
@@ -226,6 +221,33 @@ class HighlightsRepository(
 
     suspend fun updateBlacklistedUser(entities: List<BlacklistedUserEntity>) {
         blacklistedUserDao.addBlacklistedUsers(entities)
+    }
+
+    fun isUserHighlightsIgnored(name: UserName): Boolean = blacklistedUsers.value.any { !it.isRegex && it.enabled && name.value.equals(it.username, ignoreCase = true) }
+
+    suspend fun setUserHighlightsIgnored(
+        name: UserName,
+        ignored: Boolean,
+    ) {
+        if (!ignored) {
+            blacklistedUserDao.deleteExactBlacklistedUsers(name.value)
+            return
+        }
+
+        val existing = blacklistedUserDao.getExactBlacklistedUsers(name.value)
+        when {
+            existing.isEmpty() -> {
+                blacklistedUserDao.addBlacklistedUser(
+                    BlacklistedUserEntity(
+                        id = 0,
+                        enabled = true,
+                        username = name.value,
+                    ),
+                )
+            }
+
+            existing.any { !it.enabled } -> blacklistedUserDao.addBlacklistedUsers(existing.map { it.copy(enabled = true) })
+        }
     }
 
     private fun UserNoticeMessage.calculateHighlightState(): UserNoticeMessage {
@@ -371,6 +393,11 @@ class HighlightsRepository(
         else -> this
     }
 
+    fun calculateInlineWhisperHighlightState(message: WhisperMessage): WhisperMessage {
+        val highlight = validMessageHighlights.value.ofType(MessageHighlightEntityType.InlineWhisper) ?: return message
+        return message.copy(highlights = message.highlights + Highlight(HighlightType.InlineWhisper, highlight.customColor))
+    }
+
     private fun List<MessageHighlightEntity>.ofType(type: MessageHighlightEntityType): MessageHighlightEntity? = find { it.type == type }
 
     private fun MutableCollection<Highlight>.addNotificationHighlightIfEnabled(createNotification: Boolean) {
@@ -401,7 +428,7 @@ class HighlightsRepository(
                 ?.takeIf { !user.matches(it) }
                 ?.let { "|$it" }
                 .orEmpty()
-        return """\b$user$displayRegex\b""".toRegex(RegexOption.IGNORE_CASE)
+        return """\b(?:$user$displayRegex)\b""".toRegex(RegexOption.IGNORE_CASE)
     }
 
     private fun isUserBlacklisted(name: UserName): Boolean {
@@ -433,6 +460,7 @@ class HighlightsRepository(
                 MessageHighlightEntity(id = 0, enabled = true, type = MessageHighlightEntityType.ElevatedMessage, pattern = "", createNotification = false),
                 MessageHighlightEntity(id = 0, enabled = true, type = MessageHighlightEntityType.Encrypted, pattern = "", createNotification = false),
                 MessageHighlightEntity(id = 0, enabled = true, type = MessageHighlightEntityType.Reply, pattern = ""),
+                MessageHighlightEntity(id = 0, enabled = true, type = MessageHighlightEntityType.InlineWhisper, pattern = "", createNotification = false),
             )
         private val DEFAULT_BADGE_HIGHLIGHTS =
             listOf(

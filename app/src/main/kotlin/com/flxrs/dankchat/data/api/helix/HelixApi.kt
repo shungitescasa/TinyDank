@@ -2,6 +2,7 @@ package com.flxrs.dankchat.data.api.helix
 
 import com.flxrs.dankchat.data.UserId
 import com.flxrs.dankchat.data.UserName
+import com.flxrs.dankchat.data.api.SKIP_HTTP_LOGGING
 import com.flxrs.dankchat.data.api.eventapi.dto.EventSubSubscriptionRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.AnnouncementRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.BanRequestDto
@@ -9,8 +10,10 @@ import com.flxrs.dankchat.data.api.helix.dto.ChatSettingsRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.CommercialRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.ManageAutomodMessageRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.MarkerRequestDto
+import com.flxrs.dankchat.data.api.helix.dto.ModifyChannelRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.SendChatMessageRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.ShieldModeRequestDto
+import com.flxrs.dankchat.data.api.helix.dto.WarnRequestDto
 import com.flxrs.dankchat.data.api.helix.dto.WhisperRequestDto
 import com.flxrs.dankchat.data.auth.AuthDataStore
 import com.flxrs.dankchat.data.auth.StartupValidationHolder
@@ -90,6 +93,23 @@ class HelixApi(
         channels.forEach {
             parameter("user_login", it)
         }
+    }
+
+    suspend fun searchCategories(query: String): HttpResponse? = ktorClient.get("search/categories") {
+        val oAuth = getValidToken() ?: return null
+        bearerAuth(oAuth)
+        parameter("query", query)
+    }
+
+    suspend fun patchChannel(
+        broadcasterUserId: UserId,
+        request: ModifyChannelRequestDto,
+    ): HttpResponse? = ktorClient.patch("channels") {
+        val oAuth = getValidToken() ?: return null
+        bearerAuth(oAuth)
+        parameter("broadcaster_id", broadcasterUserId)
+        contentType(ContentType.Application.Json)
+        setBody(request)
     }
 
     suspend fun getUserBlocksUnvalidated(
@@ -217,6 +237,19 @@ class HelixApi(
         moderatorUserId: UserId,
         request: BanRequestDto,
     ): HttpResponse? = ktorClient.post("moderation/bans") {
+        val oAuth = getValidToken() ?: return null
+        bearerAuth(oAuth)
+        parameter("broadcaster_id", broadcasterUserId)
+        parameter("moderator_id", moderatorUserId)
+        contentType(ContentType.Application.Json)
+        setBody(request)
+    }
+
+    suspend fun postWarning(
+        broadcasterUserId: UserId,
+        moderatorUserId: UserId,
+        request: WarnRequestDto,
+    ): HttpResponse? = ktorClient.post("moderation/warnings") {
         val oAuth = getValidToken() ?: return null
         bearerAuth(oAuth)
         parameter("broadcaster_id", broadcasterUserId)
@@ -389,6 +422,8 @@ class HelixApi(
         parameter("user_id", userId)
         if (after != null) {
             parameter("after", after)
+            // The follow-up pages only differ in their long cursor, the emote load logs their number once
+            attributes.put(SKIP_HTTP_LOGGING, Unit)
         }
     }
 

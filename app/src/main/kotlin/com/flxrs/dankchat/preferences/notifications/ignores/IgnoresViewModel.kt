@@ -85,13 +85,11 @@ class IgnoresViewModel(
             }
 
             is TwitchBlockItem -> {
-                runCatching {
-                    ignoresRepository.addUserBlock(item.userId, item.username)
-                    twitchBlocks.add(position, item)
-                }.getOrElse {
+                ignoresRepository.addUserBlock(item.userId, item.username).getOrElse {
                     eventChannel.trySend(IgnoreEvent.BlockError(item))
                     return@launch
                 }
+                twitchBlocks.add(position, item)
                 isLast = position == twitchBlocks.lastIndex
             }
         }
@@ -103,22 +101,30 @@ class IgnoresViewModel(
         when (item) {
             is MessageIgnoreItem -> {
                 position = messageIgnores.indexOfFirst { it.id == item.id }
-                ignoresRepository.removeMessageIgnore(item.toEntity())
+                if (position < 0) {
+                    return@launch
+                }
                 messageIgnores.removeAt(position)
+                ignoresRepository.removeMessageIgnore(item.toEntity())
             }
 
             is UserIgnoreItem -> {
                 position = userIgnores.indexOfFirst { it.id == item.id }
-                ignoresRepository.removeUserIgnore(item.toEntity())
+                if (position < 0) {
+                    return@launch
+                }
                 userIgnores.removeAt(position)
+                ignoresRepository.removeUserIgnore(item.toEntity())
             }
 
             is TwitchBlockItem -> {
                 position = twitchBlocks.indexOfFirst { it.id == item.id }
-                runCatching {
-                    ignoresRepository.removeUserBlock(item.userId, item.username)
-                    twitchBlocks.removeAt(position)
-                }.getOrElse {
+                if (position < 0) {
+                    return@launch
+                }
+                twitchBlocks.removeAt(position)
+                ignoresRepository.removeUserBlock(item.userId, item.username).getOrElse {
+                    twitchBlocks.add(position.coerceAtMost(twitchBlocks.size), item)
                     eventChannel.trySend(IgnoreEvent.UnblockError(item))
                     return@launch
                 }

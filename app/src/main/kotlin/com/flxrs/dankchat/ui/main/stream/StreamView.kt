@@ -17,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -49,25 +50,33 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.getDisplayCutoutBounds
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.doOnAttach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.window.core.layout.WindowSizeClass
 import com.flxrs.dankchat.R
 import com.flxrs.dankchat.data.UserName
+import com.flxrs.dankchat.utils.compose.avoidRoundedCorners
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.delay
 import org.koin.compose.viewmodel.koinViewModel
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private const val OVERLAY_AUTO_HIDE_MS = 5_000L
 private const val DOUBLE_TAP_TIMEOUT_MS = 300L
@@ -89,6 +98,7 @@ fun StreamView(
     onTheaterChatDragEnd: () -> Unit = {},
     onTheaterDoubleTap: () -> Unit = {},
     overlayEndPadding: Dp = 0.dp,
+    webViewHorizontalInset: Dp = 0.dp,
 ) {
     val streamViewModel: StreamViewModel = koinViewModel()
     val touchSlop = LocalViewConfiguration.current.touchSlop
@@ -119,7 +129,7 @@ fun StreamView(
     val webView =
         remember(webViewGeneration) {
             streamViewModel.getOrCreateWebView().also { wv ->
-                wv.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                wv.setBackgroundColor(Color.Transparent.toArgb())
                 wv.webViewClient =
                     StreamComposeWebViewClient(
                         onPageFinished = { isPageLoaded = true },
@@ -266,7 +276,14 @@ fun StreamView(
         val webViewModifier =
             when {
                 isInPipMode || fillPane -> {
-                    Modifier.fillMaxSize()
+                    Modifier.fillMaxSize().then(
+                        when {
+                            // The inset area stands in for the player's letterbox
+                            webViewHorizontalInset > 0.dp -> Modifier.background(Color.Black).padding(horizontal = webViewHorizontalInset)
+
+                            else -> Modifier
+                        },
+                    )
                 }
 
                 else -> {
@@ -329,29 +346,35 @@ fun StreamView(
                 else -> 0.dp
             },
         )
-        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+        // Only small portrait screens shrink the buttons, large screens show a big stream in either orientation
+        val configuration = LocalConfiguration.current
+        val isCompact =
+            configuration.orientation == Configuration.ORIENTATION_PORTRAIT &&
+                configuration.smallestScreenWidthDp < WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND
         val buttonSize =
             when {
-                isLandscape -> 44.dp
-                else -> 34.dp
+                isCompact -> 34.dp
+                else -> 44.dp
             }
         val iconSize =
             when {
-                isLandscape -> 26.dp
-                else -> 20.dp
+                isCompact -> 20.dp
+                else -> 26.dp
             }
         AnimatedVisibility(
             visible = !isInPipMode && showOverlayButtons,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopEnd),
+            modifier = Modifier.matchParentSize(),
         ) {
             Row(
                 modifier =
                     Modifier
+                        .alignTopEndBelowCutout()
                         .statusBarsPadding()
                         .padding(top = edgeTopInset, end = animatedOverlayEndPadding + edgeEndInset)
-                        .padding(8.dp),
+                        .padding(8.dp)
+                        .avoidRoundedCorners(fallback = PaddingValues()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 when {
@@ -442,6 +465,32 @@ private fun StreamOverlayButton(
             tint = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.size(iconSize),
         )
+    }
+}
+
+// Places the content at the top end and moves it below a display cutout it would overlap,
+// so cutouts elsewhere along the top edge, like a centered camera, leave it in place
+private fun Modifier.alignTopEndBelowCutout(): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+    val x =
+        when (layoutDirection) {
+            LayoutDirection.Ltr -> constraints.maxWidth - placeable.width
+            LayoutDirection.Rtl -> 0
+        }
+    layout(constraints.maxWidth, constraints.maxHeight) {
+        val y =
+            getDisplayCutoutBounds().maxOfOrNull { cutout ->
+                val left = cutout.left.current(Float.NaN)
+                val top = cutout.top.current(Float.NaN)
+                val right = cutout.right.current(Float.NaN)
+                val bottom = cutout.bottom.current(Float.NaN)
+                val overlaps = left < x + placeable.width && right > x && top < placeable.height && bottom > 0f
+                when {
+                    overlaps -> bottom.roundToInt()
+                    else -> 0
+                }
+            } ?: 0
+        placeable.place(x, y)
     }
 }
 

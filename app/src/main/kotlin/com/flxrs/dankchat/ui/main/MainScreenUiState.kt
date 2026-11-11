@@ -8,6 +8,7 @@ import kotlinx.collections.immutable.persistentListOf
 @Immutable
 data class MainScreenUiState(
     val isFullscreen: Boolean = false,
+    val isTTSEnabled: Boolean = false,
     val showInput: Boolean = true,
     val inputActions: ImmutableList<InputAction> = persistentListOf(),
     val showCharacterCounter: Boolean = false,
@@ -15,6 +16,7 @@ data class MainScreenUiState(
     val debugMode: Boolean = false,
     val swipeNavigation: Boolean = true,
     val fontSize: Int = 14,
+    val keepStreamWhileTyping: Boolean = false,
     val gestureToolbarHidden: Boolean = false,
 ) {
     val effectiveShowAppBar: Boolean get() = !gestureToolbarHidden

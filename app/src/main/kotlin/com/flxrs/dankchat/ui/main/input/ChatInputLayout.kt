@@ -12,7 +12,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -25,16 +24,21 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -52,9 +56,11 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Theaters
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VoiceOverOff
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Shield
@@ -79,12 +85,14 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -113,6 +121,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flxrs.dankchat.R
 import com.flxrs.dankchat.preferences.appearance.InputAction
@@ -126,6 +135,14 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
+import org.koin.compose.viewmodel.koinViewModel
+
+internal val INPUT_ACTION_ICON_SIZE = 40.dp
+internal val INPUT_ACTIONS_ROW_PADDING = 8.dp
+internal val SEND_BUTTON_SIZE = 44.dp
+private val INPUT_FIELD_MIN_HEIGHT = 48.dp
+private val INPUT_MIN_BOTTOM_PADDING = 8.dp
+internal val SEND_BUTTON_SPACING = 4.dp
 
 @Composable
 fun ChatInputLayout(
@@ -137,6 +154,7 @@ fun ChatInputLayout(
     isUploading: Boolean,
     isLoading: Boolean,
     isFullscreen: Boolean,
+    isTTSEnabled: Boolean,
     isModerator: Boolean,
     isStreamActive: Boolean,
     isAudioOnly: Boolean,
@@ -175,6 +193,7 @@ fun ChatInputLayout(
     val onOverlayDismiss = callbacks.onOverlayDismiss
     val onToggleFullscreen = callbacks.onToggleFullscreen
     val onToggleTheater = callbacks.onToggleTheater
+    val onToggleTTS = callbacks.onToggleTTS
     val onToggleInput = callbacks.onToggleInput
     val onToggleStream = callbacks.onToggleStream
     val onModActions = callbacks.onModActions
@@ -233,6 +252,12 @@ fun ChatInputLayout(
     val view = LocalView.current
     val inputMethodManager = remember(view) { view.context.getSystemService(InputMethodManager::class.java) }
     val keyboardController = LocalSoftwareKeyboardController.current
+    SideEffect(overlay) {
+        if (overlay is InputOverlay.Reply || overlay is InputOverlay.Whisper) {
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
     var visibleActions by remember { mutableStateOf(effectiveActions) }
     val quickActionsExpanded = overflowExpanded || tourState.forceOverflowOpen
     var showConfigSheet by remember { mutableStateOf(false) }
@@ -251,7 +276,8 @@ fun ChatInputLayout(
                 modifier =
                     Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding(),
+                        // Without a navigation bar, like in fullscreen, the actions would touch the screen edge
+                        .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets(bottom = INPUT_MIN_BOTTOM_PADDING).exclude(WindowInsets.ime))),
             ) {
                 // Input mode overlay header
                 AnimatedVisibility(
@@ -276,6 +302,7 @@ fun ChatInputLayout(
 
                 val density = LocalDensity.current
                 var singleLineHeight by remember { mutableIntStateOf(0) }
+                var measuredWidth by remember { mutableIntStateOf(0) }
                 val textFieldEnabled = enabled && !tourState.isTourActive
                 val onKeyboardSend: (() -> Unit) -> Unit = {
                     if (canSend) {
@@ -288,8 +315,16 @@ fun ChatInputLayout(
                     Modifier
                         .defaultMinSize(minHeight = with(density) { singleLineHeight.toDp() })
                         .onSizeChanged { size ->
-                            if (textFieldState.text.isEmpty()) {
-                                singleLineHeight = maxOf(singleLineHeight, size.height)
+                            // A new width can change the label layout, the old minimum would otherwise stick
+                            when {
+                                size.width != measuredWidth -> {
+                                    measuredWidth = size.width
+                                    singleLineHeight = 0
+                                }
+
+                                textFieldState.text.isEmpty() -> {
+                                    singleLineHeight = maxOf(singleLineHeight, size.height)
+                                }
                             }
                             callbacks.onInputMultilineChanged(singleLineHeight > 0 && size.height > singleLineHeight)
                         }
@@ -298,12 +333,15 @@ fun ChatInputLayout(
                     ChatTextField(
                         textFieldState = textFieldState,
                         enabled = textFieldEnabled,
+                        isDisconnected = uiState.inputState == InputState.Disconnected,
                         hint = hint,
                         characterCounter = characterCounter,
                         showClearInputButton = enabled && uiState.showClearInputButton,
                         focusRequester = focusRequester,
                         textFieldColors = textFieldColors,
                         onKeyboardAction = onKeyboardSend,
+                        onTabComplete = callbacks.onTabComplete,
+                        onFocusChange = callbacks.onInputFocusChanged,
                         contentPadding = contentPadding,
                         modifier = textFieldModifier.then(sizeTrackingModifier),
                     )
@@ -312,7 +350,7 @@ fun ChatInputLayout(
                 if (uiState.isCompactMode) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(start = 8.dp, end = 4.dp),
+                        modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp),
                     ) {
                         EmoteKeyboardButton(
                             isEmoteMenuOpen = isEmoteMenuOpen,
@@ -321,7 +359,10 @@ fun ChatInputLayout(
                             onEmoteClick = onEmoteClick,
                             modifier = Modifier.size(40.dp),
                         )
-                        chatTextField(Modifier.weight(1f), TextFieldDefaults.contentPaddingWithoutLabel(end = 8.dp))
+                        chatTextField(Modifier.weight(1f), TextFieldDefaults.contentPaddingWithLabel(end = 8.dp, top = 4.dp, bottom = 4.dp))
+                        if (uiState.showSendWaitTimer) {
+                            SendWaitTimer()
+                        }
                         if (onNewWhisper != null) {
                             IconButton(
                                 onClick = onNewWhisper,
@@ -382,6 +423,7 @@ fun ChatInputLayout(
                     InputActionsRow(
                         inputActions = inputActions,
                         effectiveActions = effectiveActions,
+                        showSendWaitTimer = uiState.showSendWaitTimer,
                         showTheaterDockToggle = showTheaterDockToggle,
                         isTheaterChatDocked = isTheaterChatDocked,
                         onToggleTheaterChatMode = onToggleTheaterChatMode,
@@ -395,6 +437,7 @@ fun ChatInputLayout(
                         hasLastMessage = hasLastMessage,
                         isStreamActive = isStreamActive,
                         isFullscreen = isFullscreen,
+                        isTTSEnabled = isTTSEnabled,
                         isTheaterMode = isTheaterMode,
                         focusRequester = focusRequester,
                         onEncryptionClick = onEncryptionClick,
@@ -408,6 +451,7 @@ fun ChatInputLayout(
                         onModActions = onModActions,
                         onToggleFullscreen = onToggleFullscreen,
                         onToggleTheater = onToggleTheater,
+                        onToggleTTS = onToggleTTS,
                         onToggleInput = onToggleInput,
                         onDebugInfoClick = onDebugInfoClick,
                         onSend = {
@@ -513,17 +557,23 @@ fun ChatInputLayout(
                     .predictiveBackScale(backProgress)
                     .heightIn(max = overflowMenuMaxHeightDp),
                 surfaceColor = surfaceColor,
+                actionState =
+                    InputActionsState(
+                        isInputShown = true,
+                        enabled = enabled,
+                        hasLastMessage = hasLastMessage,
+                        isStreamActive = isStreamActive,
+                        hasStreamData = hasStreamData,
+                        isFullscreen = isFullscreen,
+                        isTTSEnabled = isTTSEnabled,
+                        isTheaterMode = isTheaterMode,
+                        isModerator = isModerator,
+                        isEncryptionEnabled = uiState.isEncryptionEnabled,
+                        encryptOnSend = uiState.encryptOnSend,
+                        debugMode = debugMode,
+                    ),
                 visibleActions = visibleActions,
-                enabled = enabled,
-                hasLastMessage = hasLastMessage,
-                isStreamActive = isStreamActive,
                 isAudioOnly = isAudioOnly,
-                hasStreamData = hasStreamData,
-                isFullscreen = isFullscreen,
-                isTheaterMode = isTheaterMode,
-                isModerator = isModerator,
-                isEncryptionEnabled = uiState.isEncryptionEnabled,
-                encryptOnSend = uiState.encryptOnSend,
                 tourState = tourState,
                 hasAnyConfiguredActions = inputActions.isNotEmpty(),
                 onActionClick = { action ->
@@ -536,6 +586,7 @@ fun ChatInputLayout(
                         InputAction.Fullscreen -> onToggleFullscreen()
                         InputAction.Theater -> onToggleTheater()
                         InputAction.HideInput -> onToggleInput()
+                        InputAction.TTS -> onToggleTTS()
                         InputAction.Debug -> onDebugInfoClick()
                     }
                     onOverflowExpandedChange(false)
@@ -589,8 +640,12 @@ private fun SendButton(
                         onTap = { onSend() },
                         onLongPress = { onRepeatedSendChange(true) },
                         onPress = {
-                            tryAwaitRelease()
-                            onRepeatedSendChange(false)
+                            // A gesture that is removed mid-press never reports the release
+                            try {
+                                tryAwaitRelease()
+                            } finally {
+                                onRepeatedSendChange(false)
+                            }
                         },
                     )
                 }
@@ -633,6 +688,7 @@ private fun InputActionButton(
     hasLastMessage: Boolean,
     isStreamActive: Boolean,
     isFullscreen: Boolean,
+    isTTSEnabled: Boolean,
     isTheaterMode: Boolean,
     onEncryptionClick: () -> Unit,
     onSearchClick: () -> Unit,
@@ -642,6 +698,7 @@ private fun InputActionButton(
     onModActions: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onToggleTheater: () -> Unit,
+    onToggleTTS: () -> Unit,
     onToggleInput: () -> Unit,
     modifier: Modifier = Modifier,
     onDebugInfoClick: () -> Unit = {},
@@ -717,6 +774,13 @@ private fun InputActionButton(
             tint = null
         }
 
+        InputAction.TTS -> {
+            icon = if (isTTSEnabled) Icons.Default.VoiceOverOff else Icons.Default.RecordVoiceOver
+            contentDescription = if (isTTSEnabled) R.string.menu_disable_tts else R.string.menu_enable_tts
+            onClick = onToggleTTS
+            tint = null
+        }
+
         InputAction.Debug -> {
             icon = Icons.Default.BugReport
             contentDescription = R.string.input_action_debug
@@ -727,7 +791,7 @@ private fun InputActionButton(
 
     val actionEnabled =
         when (action) {
-            InputAction.Encryption, InputAction.Search, InputAction.Fullscreen, InputAction.HideInput, InputAction.Debug -> true
+            InputAction.Encryption, InputAction.Search, InputAction.Fullscreen, InputAction.HideInput, InputAction.TTS, InputAction.Debug -> true
             InputAction.LastMessage -> enabled && hasLastMessage
             InputAction.Stream, InputAction.ModActions -> enabled
             InputAction.Theater -> enabled && isStreamActive
@@ -835,6 +899,7 @@ private fun InputOverlayHeader(
 private fun InputActionsRow(
     inputActions: ImmutableList<InputAction>,
     effectiveActions: ImmutableList<InputAction>,
+    showSendWaitTimer: Boolean,
     isEmoteMenuOpen: Boolean,
     enabled: Boolean,
     showQuickActions: Boolean,
@@ -848,6 +913,7 @@ private fun InputActionsRow(
     hasLastMessage: Boolean,
     isStreamActive: Boolean,
     isFullscreen: Boolean,
+    isTTSEnabled: Boolean,
     isTheaterMode: Boolean,
     focusRequester: FocusRequester,
     onEncryptionClick: () -> Unit,
@@ -861,6 +927,7 @@ private fun InputActionsRow(
     onModActions: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onToggleTheater: () -> Unit,
+    onToggleTTS: () -> Unit,
     onToggleInput: () -> Unit,
     onSend: () -> Unit,
     onVisibleActionsChange: (ImmutableList<InputAction>) -> Unit,
@@ -872,14 +939,18 @@ private fun InputActionsRow(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                .padding(horizontal = INPUT_ACTIONS_ROW_PADDING),
     ) {
-        val iconSize = 40.dp
+        val iconSize = INPUT_ACTION_ICON_SIZE
         // Fixed slots: emote button + conditionally dock toggle, overflow, whisper, send
-        val fixedSlots = 1 + listOf(showTheaterDockToggle, showQuickActions, onNewWhisper != null, showSendButton).count { it }
-        val availableForActions = maxWidth - iconSize * fixedSlots
+        val fixedIconSlots = 1 + listOf(showTheaterDockToggle, showQuickActions, onNewWhisper != null).count { it }
+        val sendButtonWidth =
+            when {
+                showSendButton -> SEND_BUTTON_SPACING + SEND_BUTTON_SIZE
+                else -> 0.dp
+            }
+        val availableForActions = maxWidth - iconSize * fixedIconSlots - sendButtonWidth
         val maxVisibleActions = (availableForActions / iconSize).toInt().coerceAtLeast(0)
-        val allActions = inputActions.take(maxVisibleActions).toImmutableList()
         val visibleActions = effectiveActions.take(maxVisibleActions).toImmutableList()
         SideEffect {
             onVisibleActionsChange(visibleActions)
@@ -908,10 +979,14 @@ private fun InputActionsRow(
 
             Spacer(modifier = Modifier.weight(1f))
 
+            if (showSendWaitTimer) {
+                SendWaitTimer()
+            }
+
             // End-aligned group: overflow + actions + whisper + send
             Row(verticalAlignment = Alignment.CenterVertically) {
                 EndAlignedActionGroup(
-                    allActions = allActions,
+                    allActions = inputActions,
                     visibleActions = visibleActions,
                     iconSize = iconSize,
                     showQuickActions = showQuickActions,
@@ -923,6 +998,7 @@ private fun InputActionsRow(
                     hasLastMessage = hasLastMessage,
                     isStreamActive = isStreamActive,
                     isFullscreen = isFullscreen,
+                    isTTSEnabled = isTTSEnabled,
                     isTheaterMode = isTheaterMode,
                     onEncryptionClick = onEncryptionClick,
                     onOverflowExpandedChange = onOverflowExpandedChange,
@@ -934,6 +1010,7 @@ private fun InputActionsRow(
                     onModActions = onModActions,
                     onToggleFullscreen = onToggleFullscreen,
                     onToggleTheater = onToggleTheater,
+                    onToggleTTS = onToggleTTS,
                     onToggleInput = onToggleInput,
                     onDebugInfoClick = onDebugInfoClick,
                     onSend = onSend,
@@ -961,6 +1038,7 @@ private fun EndAlignedActionGroup(
     hasLastMessage: Boolean,
     isStreamActive: Boolean,
     isFullscreen: Boolean,
+    isTTSEnabled: Boolean,
     isTheaterMode: Boolean,
     onEncryptionClick: () -> Unit,
     onOverflowExpandedChange: (Boolean) -> Unit,
@@ -972,6 +1050,7 @@ private fun EndAlignedActionGroup(
     onModActions: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onToggleTheater: () -> Unit,
+    onToggleTTS: () -> Unit,
     onToggleInput: () -> Unit,
     onSend: () -> Unit,
     onDebugInfoClick: () -> Unit = {},
@@ -1021,6 +1100,7 @@ private fun EndAlignedActionGroup(
                         hasLastMessage = hasLastMessage,
                         isStreamActive = isStreamActive,
                         isFullscreen = isFullscreen,
+                        isTTSEnabled = isTTSEnabled,
                         isTheaterMode = isTheaterMode,
                         onEncryptionClick = onEncryptionClick,
                         onSearchClick = onSearchClick,
@@ -1030,6 +1110,7 @@ private fun EndAlignedActionGroup(
                         onModActions = onModActions,
                         onToggleFullscreen = onToggleFullscreen,
                         onToggleTheater = onToggleTheater,
+                        onToggleTTS = onToggleTTS,
                         onToggleInput = onToggleInput,
                         onDebugInfoClick = onDebugInfoClick,
                         modifier = Modifier.size(iconSize),
@@ -1041,13 +1122,13 @@ private fun EndAlignedActionGroup(
 
     // Send Button (Right)
     if (showSendButton) {
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(SEND_BUTTON_SPACING))
         SendButton(
             enabled = canSend,
             isRepeatedSendEnabled = isRepeatedSendEnabled,
             onSend = onSend,
             onRepeatedSendChange = onRepeatedSendChange,
-            modifier = Modifier.size(44.dp),
+            modifier = Modifier.size(SEND_BUTTON_SIZE),
         )
     }
 }
@@ -1056,22 +1137,47 @@ private fun EndAlignedActionGroup(
 private fun ChatTextField(
     textFieldState: TextFieldState,
     enabled: Boolean,
+    isDisconnected: Boolean,
     hint: String,
     characterCounter: StateFlow<CharacterCounterState>,
     showClearInputButton: Boolean,
     focusRequester: FocusRequester,
     textFieldColors: TextFieldColors,
     onKeyboardAction: (() -> Unit) -> Unit,
+    onTabComplete: () -> Boolean,
+    onFocusChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues? = null,
 ) {
+    // Disabling the field drops its focus, a reconnect hands it back so typing continues where it stopped
+    val isEnabled by rememberUpdatedState(enabled)
+    val isDisabledByDisconnect by rememberUpdatedState(isDisconnected)
+    var wasFocused by remember { mutableStateOf(false) }
+    var restoreFocus by remember { mutableStateOf(false) }
+    SideEffect(enabled) {
+        if (enabled && restoreFocus) {
+            restoreFocus = false
+            focusRequester.requestFocus()
+        }
+    }
+    LifecycleStartEffect(Unit) {
+        onStopOrDispose { restoreFocus = false }
+    }
+
     TextField(
         state = textFieldState,
         enabled = enabled,
         modifier =
             modifier
+                .heightIn(min = INPUT_FIELD_MIN_HEIGHT)
                 .focusRequester(focusRequester)
-                .onPreviewKeyEvent { event ->
+                .onFocusChanged { state ->
+                    if (wasFocused && !state.isFocused && !isEnabled && isDisabledByDisconnect) {
+                        restoreFocus = true
+                    }
+                    wasFocused = state.isFocused
+                    onFocusChange(state.isFocused)
+                }.onPreviewKeyEvent { event ->
                     val isEnter = event.key == Key.Enter || event.key == Key.NumPadEnter
                     when {
                         isEnter && !event.isShiftPressed -> {
@@ -1081,10 +1187,13 @@ private fun ChatTextField(
                             true
                         }
 
+                        // Hardware keyboard Tab completes the first suggestion, falls through when there is none
+                        event.key == Key.Tab && !event.isShiftPressed && event.type == KeyEventType.KeyDown -> onTabComplete()
+
                         else -> false
                     }
                 },
-        contentPadding = contentPadding ?: TextFieldDefaults.contentPaddingWithLabel(),
+        contentPadding = contentPadding ?: TextFieldDefaults.contentPaddingWithLabel(top = 4.dp, bottom = 4.dp),
         label = { Text(hint) },
         suffix = {
             Row(
@@ -1143,6 +1252,20 @@ private fun ChatTextField(
             ),
         onKeyboardAction = onKeyboardAction,
     )
+}
+
+// Collects the per-second countdown on its own so only this text recomposes while it ticks
+@Composable
+private fun SendWaitTimer(viewModel: SendWaitTimerViewModel = koinViewModel()) {
+    val remainingTime = viewModel.remainingTime.collectAsStateWithLifecycle().value
+    if (remainingTime != null) {
+        Text(
+            text = remainingTime,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+    }
 }
 
 @Composable
@@ -1229,17 +1352,17 @@ internal fun ExpandableHelperText(
     modifier: Modifier = Modifier,
 ) {
     val resolvedRoomState = helperText.roomStateParts.map { it.resolve() }
-    val partSeparator = if (helperText.isCompact) " · " else ", "
-    val sectionSeparator = if (helperText.isCompact) " · " else " - "
-    val roomStateText = resolvedRoomState.joinToString(separator = partSeparator)
-    val streamInfoText = helperText.streamInfo
-    val combinedText = listOfNotNull(roomStateText.ifEmpty { null }, streamInfoText).joinToString(separator = sectionSeparator)
+    val roomStateText = resolvedRoomState.joinToString(separator = ", ")
+    val compactRoomStateText = resolvedRoomState.joinToString(separator = " · ")
+    val streamInfoText = helperText.streamInfo?.full
+    val fullText = listOfNotNull(roomStateText.ifEmpty { null }, streamInfoText).joinToString(separator = " - ")
+    val compactText = listOfNotNull(compactRoomStateText.ifEmpty { null }, helperText.streamInfo?.compact).joinToString(separator = " · ")
     val style = MaterialTheme.typography.labelSmall
 
     when {
         helperText.isCompact -> {
             Text(
-                text = combinedText,
+                text = compactText,
                 style = style,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -1249,10 +1372,11 @@ internal fun ExpandableHelperText(
         }
 
         else -> {
-            ExpandableMarqueeHelperText(
+            TwoLineExpandableHelperText(
                 roomStateText = roomStateText,
                 streamInfoText = streamInfoText,
-                combinedText = combinedText,
+                fullText = fullText,
+                compactText = compactText,
                 style = style,
                 modifier = modifier,
             )
@@ -1260,11 +1384,13 @@ internal fun ExpandableHelperText(
     }
 }
 
+// Shows the full text when it fits, otherwise the compact text, which expands to the full text on two lines on tap
 @Composable
-private fun ExpandableMarqueeHelperText(
+private fun TwoLineExpandableHelperText(
     roomStateText: String,
     streamInfoText: String?,
-    combinedText: String,
+    fullText: String,
+    compactText: String,
     style: TextStyle,
     modifier: Modifier = Modifier,
 ) {
@@ -1279,8 +1405,8 @@ private fun ExpandableMarqueeHelperText(
     ) {
         val maxWidthPx = with(density) { maxWidth.roundToPx() }
         val fitsOnOneLine =
-            remember(combinedText, style, maxWidthPx) {
-                textMeasurer.measure(combinedText, style).size.width <= maxWidthPx
+            remember(fullText, style, maxWidthPx) {
+                textMeasurer.measure(fullText, style).size.width <= maxWidthPx
             }
         val canExpand = !fitsOnOneLine && streamInfoText != null && roomStateText.isNotEmpty()
         val showTwoLines = expanded && canExpand
@@ -1298,25 +1424,32 @@ private fun ExpandableMarqueeHelperText(
                             style = style,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
-                            modifier = Modifier.fillMaxWidth().basicMarquee(),
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                         Text(
                             text = streamInfoText,
                             style = style,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
-                            modifier = Modifier.fillMaxWidth().basicMarquee(),
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
 
                 else -> {
                     Text(
-                        text = combinedText,
+                        text =
+                            when {
+                                fitsOnOneLine -> fullText
+                                else -> compactText
+                            },
                         style = style,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        modifier = Modifier.fillMaxWidth().basicMarquee(),
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }

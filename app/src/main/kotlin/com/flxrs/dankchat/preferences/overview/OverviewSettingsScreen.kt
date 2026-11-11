@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Construction
 import androidx.compose.material.icons.filled.DeveloperMode
 import androidx.compose.material.icons.filled.FiberNew
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
@@ -29,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -37,6 +39,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.tooling.preview.PreviewDynamicColors
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flxrs.dankchat.BuildConfig
 import com.flxrs.dankchat.R
 import com.flxrs.dankchat.preferences.components.NavigationBarSpacer
@@ -47,9 +50,10 @@ import com.flxrs.dankchat.preferences.components.PreferenceSummary
 import com.flxrs.dankchat.ui.theme.DankChatTheme
 import com.flxrs.dankchat.utils.compose.buildClickableAnnotation
 import com.flxrs.dankchat.utils.compose.buildLinkAnnotation
+import org.koin.compose.viewmodel.koinViewModel
 
 private const val GITHUB_URL = "https://github.com/flex3r/dankchat"
-private const val FORK_GITHUB_URL = "https://github.com/shungitescasa/tinydankchat"
+private const val FORK_GITHUB_URL = "https://github.com/shungitescasa/tinydank"
 private const val TWITCH_TOS_URL = "https://www.twitch.tv/p/terms-of-service"
 
 sealed interface SettingsNavigation {
@@ -67,6 +71,8 @@ sealed interface SettingsNavigation {
 
     data object Developer : SettingsNavigation
 
+    data object DankChatAccount : SettingsNavigation
+
     data object Changelog : SettingsNavigation
 
     data object About : SettingsNavigation
@@ -76,6 +82,28 @@ sealed interface SettingsNavigation {
 fun OverviewSettingsScreen(
     isLoggedIn: Boolean,
     hasChangelog: Boolean,
+    onBack: () -> Unit,
+    onLogout: () -> Unit,
+    onNavigate: (SettingsNavigation) -> Unit,
+) {
+    val viewModel = koinViewModel<OverviewSettingsViewModel>()
+    val showDankChatAccount by viewModel.showDankChatAccount.collectAsStateWithLifecycle()
+
+    OverviewSettingsScreen(
+        isLoggedIn = isLoggedIn,
+        hasChangelog = hasChangelog,
+        showDankChatAccount = showDankChatAccount,
+        onBack = onBack,
+        onLogout = onLogout,
+        onNavigate = onNavigate,
+    )
+}
+
+@Composable
+private fun OverviewSettingsScreen(
+    isLoggedIn: Boolean,
+    hasChangelog: Boolean,
+    showDankChatAccount: Boolean,
     onBack: () -> Unit,
     onLogout: () -> Unit,
     onNavigate: (SettingsNavigation) -> Unit,
@@ -140,6 +168,12 @@ fun OverviewSettingsScreen(
                 })
             }
 
+            AnimatedVisibility(showDankChatAccount) {
+                PreferenceItem(stringResource(R.string.preference_dankchat_account_title), Icons.Default.ManageAccounts, onClick = {
+                    onNavigate(SettingsNavigation.DankChatAccount)
+                })
+            }
+
             PreferenceItem(stringResource(R.string.logout), Icons.AutoMirrored.Default.ExitToApp, isEnabled = isLoggedIn, onClick = onLogout)
             SecretDankerModeTrigger {
                 PreferenceCategoryWithSummary(
@@ -151,17 +185,21 @@ fun OverviewSettingsScreen(
                     },
                 ) {
                     val aboutSummary = stringResource(R.string.preference_about_summary, BuildConfig.VERSION_NAME)
+                    val aboutFork = stringResource(R.string.preference_about_fork)
                     val aboutTos = stringResource(R.string.preference_about_tos)
                     val annotated =
                         buildAnnotatedString {
+                            append(aboutFork)
+                            appendLine()
+                            withLink(link = buildLinkAnnotation(FORK_GITHUB_URL)) {
+                                append(FORK_GITHUB_URL)
+                            }
+                            appendLine()
+                            appendLine()
                             append(aboutSummary)
                             appendLine()
                             withLink(link = buildLinkAnnotation(GITHUB_URL)) {
                                 append(GITHUB_URL)
-                            }
-                            appendLine()
-                            withLink(link = buildLinkAnnotation(FORK_GITHUB_URL)) {
-                                append(FORK_GITHUB_URL)
                             }
                             appendLine()
                             appendLine()
@@ -194,6 +232,7 @@ private fun OverviewSettingsPreview() {
         OverviewSettingsScreen(
             isLoggedIn = false,
             hasChangelog = true,
+            showDankChatAccount = false,
             onBack = { },
             onLogout = { },
             onNavigate = { },

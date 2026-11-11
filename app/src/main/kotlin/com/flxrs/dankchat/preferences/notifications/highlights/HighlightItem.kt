@@ -5,6 +5,7 @@ import com.flxrs.dankchat.data.database.entity.BlacklistedUserEntity
 import com.flxrs.dankchat.data.database.entity.MessageHighlightEntity
 import com.flxrs.dankchat.data.database.entity.MessageHighlightEntityType
 import com.flxrs.dankchat.data.database.entity.UserHighlightEntity
+import com.flxrs.dankchat.utils.extensions.isValidRegex
 
 sealed interface HighlightItem {
     val id: Long
@@ -32,10 +33,12 @@ data class MessageHighlightItem(
         ElevatedMessage,
         Encrypted,
         Reply,
+        InlineWhisper,
         Custom,
     }
 
     val canNotify = type in WITH_NOTIFIES
+    val hasInvalidRegex = isRegex && !pattern.isValidRegex
 
     companion object {
         private val WITH_NOTIFIES = listOf(Type.Username, Type.Custom, Type.Reply)
@@ -66,7 +69,9 @@ data class BlacklistedUserItem(
     val enabled: Boolean,
     val username: String,
     val isRegex: Boolean,
-) : HighlightItem
+) : HighlightItem {
+    val hasInvalidRegex = isRegex && !username.isValidRegex
+}
 
 fun MessageHighlightEntity.toItem(
     loggedIn: Boolean,
@@ -105,6 +110,7 @@ fun MessageHighlightItem.Type.toEntityType(): MessageHighlightEntityType = when 
     MessageHighlightItem.Type.ElevatedMessage -> MessageHighlightEntityType.ElevatedMessage
     MessageHighlightItem.Type.Encrypted -> MessageHighlightEntityType.Encrypted
     MessageHighlightItem.Type.Reply -> MessageHighlightEntityType.Reply
+    MessageHighlightItem.Type.InlineWhisper -> MessageHighlightEntityType.InlineWhisper
     MessageHighlightItem.Type.Custom -> MessageHighlightEntityType.Custom
 }
 
@@ -118,6 +124,7 @@ fun MessageHighlightEntityType.toItemType(): MessageHighlightItem.Type = when (t
     MessageHighlightEntityType.ElevatedMessage -> MessageHighlightItem.Type.ElevatedMessage
     MessageHighlightEntityType.Encrypted -> MessageHighlightItem.Type.Encrypted
     MessageHighlightEntityType.Reply -> MessageHighlightItem.Type.Reply
+    MessageHighlightEntityType.InlineWhisper -> MessageHighlightItem.Type.InlineWhisper
     MessageHighlightEntityType.Custom -> MessageHighlightItem.Type.Custom
 }
 

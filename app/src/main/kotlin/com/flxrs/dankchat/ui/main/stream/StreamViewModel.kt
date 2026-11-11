@@ -78,7 +78,26 @@ class StreamViewModel(
             currentStream != null && !audioOnly && pipEnabled
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    private var lastStreamedChannel: UserName? = null
+    var hasWebViewBeenAttached: Boolean = false
+
+    @SuppressLint("StaticFieldLeak")
+    private var cachedWebView: StreamWebView? = null
+
+    private val _webViewGeneration = MutableStateFlow(0)
+    val webViewGeneration: StateFlow<Int> = _webViewGeneration.asStateFlow()
+
     init {
+        // Switching to another channel, e.g. from a notification, leaves the theater as its chat only shows the streamed channel
+        viewModelScope.launch {
+            combine(_isTheaterMode, _currentStreamedChannel, chatChannelProvider.activeChannel) { theater, stream, active ->
+                theater && stream != null && active != stream
+            }.collect { switchedAway ->
+                if (switchedAway) {
+                    resetTheaterMode()
+                }
+            }
+        }
         viewModelScope.launch {
             chatChannelProvider.channels.collect { channels ->
                 if (channels != null) {
@@ -92,23 +111,7 @@ class StreamViewModel(
         }
     }
 
-    private var lastStreamedChannel: UserName? = null
-    var hasWebViewBeenAttached: Boolean = false
-
-    @SuppressLint("StaticFieldLeak")
-    private var cachedWebView: StreamWebView? = null
-
-    private val _webViewGeneration = MutableStateFlow(0)
-    val webViewGeneration: StateFlow<Int> = _webViewGeneration.asStateFlow()
-
-    fun getOrCreateWebView(): StreamWebView {
-        val preventReloads = streamsSettingsDataStore.current().preventStreamReloads
-        return if (preventReloads) {
-            cachedWebView ?: StreamWebView(getApplication()).also { cachedWebView = it }
-        } else {
-            StreamWebView(getApplication())
-        }
-    }
+    fun getOrCreateWebView(): StreamWebView = cachedWebView ?: StreamWebView(getApplication()).also { cachedWebView = it }
 
     fun setStream(
         channel: UserName,
@@ -176,9 +179,13 @@ class StreamViewModel(
             // Toggling a suspended theater re-enters it instead of turning it off
             _isTheaterMode.value && _isTheaterRotationSuspended.value -> _isTheaterRotationSuspended.value = false
 
+            _isTheaterMode.value -> resetTheaterMode()
+
             else -> {
+                // The theater chat shows the streamed channel, so the input has to target it as well
+                _currentStreamedChannel.value?.let(chatChannelProvider::setActiveChannel)
                 _isTheaterRotationSuspended.value = false
-                _isTheaterMode.update { !it }
+                _isTheaterMode.value = true
             }
         }
     }
@@ -227,12 +234,20 @@ class StreamViewModel(
         }
     }
 
+    val dockedTheaterChatWidth: Float?
+        get() = streamsSettingsDataStore.current().dockedTheaterChatWidth
+
+    fun setDockedTheaterChatWidth(width: Float) {
+        viewModelScope.launch {
+            streamsSettingsDataStore.update { it.copy(dockedTheaterChatWidth = width) }
+        }
+    }
+
     override fun onCleared() {
         streamDataRepository.cancelStreamData()
         cachedWebView?.destroy()
         cachedWebView = null
         lastStreamedChannel = null
-        super.onCleared()
     }
 }
 

@@ -8,10 +8,14 @@ import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
+import android.widget.Toast
 import androidx.core.content.getSystemService
+import com.flxrs.dankchat.R
 import com.flxrs.dankchat.data.UserName
 import com.flxrs.dankchat.data.repo.chat.ChatChannelProvider
 import com.flxrs.dankchat.data.repo.chat.ChatNotificationRepository
+import com.flxrs.dankchat.data.twitch.emote.ChatMessageEmote
+import com.flxrs.dankchat.data.twitch.emote.ChatMessageEmoteType
 import com.flxrs.dankchat.data.twitch.message.Message
 import com.flxrs.dankchat.data.twitch.message.NoticeMessage
 import com.flxrs.dankchat.data.twitch.message.PrivMessage
@@ -22,9 +26,10 @@ import com.flxrs.dankchat.preferences.tools.TTSPlayMode
 import com.flxrs.dankchat.preferences.tools.ToolsSettings
 import com.flxrs.dankchat.preferences.tools.ToolsSettingsDataStore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.core.annotation.Single
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
@@ -35,15 +40,19 @@ class ChatTTSPlayer(
     private val chatNotificationRepository: ChatNotificationRepository,
     private val chatChannelProvider: ChatChannelProvider,
     private val toolsSettingsDataStore: ToolsSettingsDataStore,
-    dispatchersProvider: DispatchersProvider,
+    private val dispatchersProvider: DispatchersProvider,
 ) {
-    private val scope = CoroutineScope(dispatchersProvider.io + SupervisorJob())
+    // Single parallelism serializes the settings and message collectors around the shared engine state
+    private val scope = CoroutineScope(dispatchersProvider.io.limitedParallelism(1) + SupervisorJob())
 
     private var tts: TextToSpeech? = null
     private var audioManager: AudioManager? = null
     private var previousTTSUser: UserName? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     private var utteranceId = 0
+    private var engineGeneration = 0
+    private var appliedForceEnglish: Boolean? = null
+    private var collectJob: Job? = null
     private val pendingUtterances = AtomicInteger(0)
 
     private val audioAttributes: AudioAttributes = AudioAttributes
@@ -53,14 +62,19 @@ class ChatTTSPlayer(
         .build()
 
     fun start() {
-        scope.launch {
-            combine(
-                chatNotificationRepository.messageUpdates,
-                toolsSettingsDataStore.settings,
-                chatChannelProvider.activeChannel,
-            ) { items, settings, activeChannel ->
-                Triple(items, settings, activeChannel)
-            }.collect { (items, settings, activeChannel) ->
+        // Every Activity onCreate calls this, keep a single collector across recreations
+        if (collectJob?.isActive == true) {
+            return
+        }
+
+        collectJob = scope.launch {
+            launch {
+                toolsSettingsDataStore.settings.collect(::ensureTTSState)
+            }
+            // Message updates are events, so read settings at processing time instead of combining and conflating them
+            chatNotificationRepository.messageUpdates.collect { items ->
+                val settings = toolsSettingsDataStore.current()
+                val activeChannel = chatChannelProvider.activeChannel.value
                 ensureTTSState(settings)
                 items.forEach { (message) ->
                     processMessage(message, settings, activeChannel)
@@ -70,46 +84,72 @@ class ChatTTSPlayer(
     }
 
     private fun ensureTTSState(settings: ToolsSettings) {
+        val voiceSetting = appliedForceEnglish
         when {
             settings.ttsEnabled && tts == null -> {
                 audioManager = context.getSystemService()
+                val generation = ++engineGeneration
+                // The engine reports on the main thread, the engine state belongs to this scope
                 tts = TextToSpeech(context) { status ->
-                    when (status) {
-                        TextToSpeech.SUCCESS -> {
-                            applyVoice(settings.ttsForceEnglish)
-                            tts?.setAudioAttributes(audioAttributes)
-                            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                                override fun onStart(utteranceId: String?) = Unit
-
-                                override fun onDone(utteranceId: String?) = onUtteranceFinished()
-
-                                @Suppress("OVERRIDE_DEPRECATION")
-                                override fun onError(utteranceId: String?) = onUtteranceFinished()
-
-                                override fun onError(
-                                    utteranceId: String?,
-                                    errorCode: Int,
-                                ) = onUtteranceFinished()
-
-                                override fun onStop(
-                                    utteranceId: String?,
-                                    interrupted: Boolean,
-                                ) = onUtteranceFinished()
-                            })
-                        }
-
-                        else -> {
-                            shutdownTTS()
-                            scope.launch {
-                                toolsSettingsDataStore.update { it.copy(ttsEnabled = false) }
-                            }
-                        }
-                    }
+                    scope.launch { onEngineInitialized(generation, status) }
                 }
             }
 
             !settings.ttsEnabled && tts != null -> {
                 shutdownTTS()
+            }
+
+            settings.ttsEnabled && voiceSetting != null && voiceSetting != settings.ttsForceEnglish -> {
+                applyVoice(settings.ttsForceEnglish)
+            }
+        }
+    }
+
+    private fun onEngineInitialized(
+        generation: Int,
+        status: Int,
+    ) {
+        // An engine that was shut down in the meantime can still report
+        if (generation != engineGeneration) {
+            return
+        }
+
+        when (status) {
+            TextToSpeech.SUCCESS -> {
+                applyVoice(toolsSettingsDataStore.current().ttsForceEnglish)
+                tts?.setAudioAttributes(audioAttributes)
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) = Unit
+
+                    override fun onDone(utteranceId: String?) = onUtteranceFinished()
+
+                    @Suppress("OVERRIDE_DEPRECATION")
+                    override fun onError(utteranceId: String?) = onUtteranceFinished()
+
+                    override fun onError(
+                        utteranceId: String?,
+                        errorCode: Int,
+                    ) = onUtteranceFinished()
+
+                    override fun onStop(
+                        utteranceId: String?,
+                        interrupted: Boolean,
+                    ) = onUtteranceFinished()
+                })
+            }
+
+            else -> {
+                disableAfterFailure()
+            }
+        }
+    }
+
+    private fun disableAfterFailure() {
+        shutdownTTS()
+        scope.launch {
+            toolsSettingsDataStore.update { it.copy(ttsEnabled = false) }
+            withContext(dispatchersProvider.main) {
+                Toast.makeText(context, R.string.tts_start_failed, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -121,6 +161,7 @@ class ChatTTSPlayer(
         }
 
         if (voice != null && tts?.setVoice(voice) != TextToSpeech.ERROR) {
+            appliedForceEnglish = forceEnglish
             return
         }
 
@@ -130,16 +171,14 @@ class ChatTTSPlayer(
             else -> findEnglishVoice()
         }
         if (fallbackVoice != null && tts?.setVoice(fallbackVoice) != TextToSpeech.ERROR) {
+            appliedForceEnglish = forceEnglish
             scope.launch {
                 toolsSettingsDataStore.update { it.copy(ttsForceEnglish = true) }
             }
             return
         }
 
-        shutdownTTS()
-        scope.launch {
-            toolsSettingsDataStore.update { it.copy(ttsEnabled = false) }
-        }
+        disableAfterFailure()
     }
 
     private fun findEnglishVoice(): Voice? = tts?.voices?.find { it.locale == Locale.US && !it.isNetworkConnectionRequired }
@@ -149,6 +188,8 @@ class ChatTTSPlayer(
         abandonAudioFocus()
         tts?.shutdown()
         tts = null
+        engineGeneration++
+        appliedForceEnglish = null
         previousTTSUser = null
         audioManager = null
     }
@@ -226,9 +267,15 @@ class ChatTTSPlayer(
 
             is PrivMessage -> {
                 val filtered = message.message
+                    .withSpokenCheermotes(message.emotes)
                     .let { text ->
                         when {
-                            settings.ttsIgnoreEmotes -> message.emotes.fold(text) { acc, emote -> acc.replace(emote.code, newValue = "", ignoreCase = true) }
+                            settings.ttsIgnoreEmotes -> {
+                                message.emotes
+                                    .filterNot { it.type == ChatMessageEmoteType.Cheermote }
+                                    .fold(text) { acc, emote -> acc.replace(emote.code, newValue = "", ignoreCase = true) }
+                            }
+
                             else -> text
                         }
                     }.let { text ->
@@ -245,10 +292,14 @@ class ChatTTSPlayer(
 
                 if (filtered.isBlank()) return
 
+                val spokenName = when {
+                    settings.ttsIgnoreUserNameNumbers -> message.name.value.withoutNumbers()
+                    else -> message.name.value
+                }
                 when {
                     settings.ttsMessageFormat == TTSMessageFormat.Message || message.name == previousTTSUser -> filtered
-                    tts?.voice?.locale?.language == Locale.ENGLISH.language -> "${message.name} said $filtered"
-                    else -> "${message.name}. $filtered"
+                    tts?.voice?.locale?.language == Locale.ENGLISH.language -> "$spokenName said $filtered"
+                    else -> "$spokenName. $filtered"
                 }.also { previousTTSUser = message.name }
             }
 
@@ -276,7 +327,29 @@ class ChatTTSPlayer(
         }
     }
 
+    // Cheermotes are spoken as their bit amount, also when emotes are ignored
+    private fun String.withSpokenCheermotes(emotes: List<ChatMessageEmote>): String {
+        val amounts = emotes
+            .mapNotNull { emote -> emote.cheerAmount?.let { emote.code.lowercase() to it } }
+            .toMap()
+        return when {
+            amounts.isEmpty() -> this
+            else -> split(' ').joinToString(separator = " ") { word -> amounts[word.lowercase()]?.let(::spokenBits) ?: word }
+        }
+    }
+
+    private fun spokenBits(amount: Int): String = when (amount) {
+        1 -> "1 bit"
+        else -> "$amount bits"
+    }
+
+    // Falls back to the full name for names that consist only of numbers and underscores
+    private fun String.withoutNumbers(): String = replace(DIGITS_REGEX, replacement = "")
+        .trim('_')
+        .ifEmpty { this }
+
     companion object {
+        private val DIGITS_REGEX = "\\d+".toRegex()
         private val TTS_COMMAND_PREFIXES = setOf('!', '$', '%', '+', '-', '~')
         private val UNICODE_SYMBOL_REGEX = "\\p{So}|\\p{Sc}|\\p{Sm}|\\p{Cn}".toRegex()
         private val URL_REGEX = "[(http(s)?):\\/\\/(www\\.)?a-zA-Z0-9@:%._\\+~#=]{2,256}\\.[a-z]{2,6}\\b([-a-zA-Z0-9@:%_\\+.~#?&//=]*)".toRegex(RegexOption.IGNORE_CASE)

@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -97,6 +98,7 @@ private val FOLLOWER_MODE_PRESETS =
     )
 
 @Composable
+@ReadOnlyComposable
 private fun formatFollowerPreset(minutes: Int): String = when (minutes) {
     0 -> stringResource(R.string.room_state_follower_any)
     in 1..59 -> stringResource(R.string.room_state_duration_minutes, minutes)
@@ -111,7 +113,7 @@ private fun formatFollowerPreset(minutes: Int): String = when (minutes) {
 fun ModActionsDialog(
     roomState: RoomState?,
     isBroadcaster: Boolean,
-    isStreamActive: Boolean,
+    isLive: Boolean,
     shieldModeActive: Boolean?,
     onSendCommand: (String) -> Unit,
     onAnnounce: () -> Unit,
@@ -133,7 +135,7 @@ fun ModActionsDialog(
                     ModActionsMainView(
                         roomState = roomState,
                         isBroadcaster = isBroadcaster,
-                        isStreamActive = isStreamActive,
+                        isLive = isLive,
                         shieldModeActive = shieldModeActive,
                         onSendCommand = onSendCommand,
                         onShowSubView = { subView = it },
@@ -260,7 +262,7 @@ fun ModActionsDialog(
 private fun ModActionsMainView(
     roomState: RoomState?,
     isBroadcaster: Boolean,
-    isStreamActive: Boolean,
+    isLive: Boolean,
     shieldModeActive: Boolean?,
     onSendCommand: (String) -> Unit,
     onShowSubView: (SubView) -> Unit,
@@ -327,7 +329,7 @@ private fun ModActionsMainView(
                 },
                 label = { Text(stringResource(R.string.mod_actions_announce)) },
             )
-            if (isStreamActive) {
+            if (isLive) {
                 AssistChip(
                     onClick = { onShowSubView(SubView.ShoutoutInput) },
                     label = { Text(stringResource(R.string.mod_actions_shoutout)) },
@@ -336,7 +338,7 @@ private fun ModActionsMainView(
         }
 
         // Broadcaster section
-        if (isBroadcaster && isStreamActive) {
+        if (isBroadcaster && isLive) {
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SectionHeader(stringResource(R.string.mod_actions_broadcaster_section))

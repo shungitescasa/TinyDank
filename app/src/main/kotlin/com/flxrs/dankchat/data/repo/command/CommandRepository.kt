@@ -7,7 +7,7 @@ import com.flxrs.dankchat.data.api.supibot.SupibotApiClient
 import com.flxrs.dankchat.data.auth.AuthDataStore
 import com.flxrs.dankchat.data.repo.IgnoresRepository
 import com.flxrs.dankchat.data.repo.chat.UserState
-import com.flxrs.dankchat.data.toUserName
+import com.flxrs.dankchat.data.toCommandTargetUserName
 import com.flxrs.dankchat.data.twitch.command.CommandContext
 import com.flxrs.dankchat.data.twitch.command.TwitchCommand
 import com.flxrs.dankchat.data.twitch.command.TwitchCommandRepository
@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.core.annotation.Single
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.system.measureTimeMillis
 
 private val logger = KotlinLogging.logger("CommandRepository")
@@ -59,14 +60,15 @@ class CommandRepository(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + dispatchersProvider.default)
     private val customCommands = chatSettingsDataStore.commands.stateIn(scope, SharingStarted.Eagerly, emptyList())
-    private val supibotCommands = mutableMapOf<UserName, MutableStateFlow<List<String>>>()
+    private val supibotCommands = ConcurrentHashMap<UserName, MutableStateFlow<List<String>>>()
 
     private val defaultCommands = Command.entries
     private val defaultCommandTriggers = defaultCommands.map { it.trigger }
+    private val commandShortcutTriggers = CommandShortcut.entries.map { it.trigger }
 
     private val commandTriggers =
         chatSettingsDataStore.commands.map { customCommands ->
-            defaultCommandTriggers + TwitchCommandRepository.ALL_COMMAND_TRIGGERS + customCommands.map(CustomCommand::trigger)
+            defaultCommandTriggers + commandShortcutTriggers + TwitchCommandRepository.ALL_COMMAND_TRIGGERS + customCommands.map(CustomCommand::trigger)
         }
 
     init {
@@ -85,9 +87,10 @@ class CommandRepository(
 
     fun getReservedTriggers(): Set<String> {
         val builtIn = defaultCommandTriggers
+        val shortcuts = commandShortcutTriggers
         val twitch = TwitchCommandRepository.ALL_COMMAND_TRIGGERS
         val supibot = supibotCommands.values.flatMap { it.value }
-        return (builtIn + twitch + supibot).toSet()
+        return (builtIn + shortcuts + twitch + supibot).toSet()
     }
 
     fun getCommandTriggers(channel: UserName): Flow<List<String>> = when (channel) {
@@ -273,23 +276,18 @@ class CommandRepository(
             return CommandResult.AcceptedWithResponse(TextResource.Res(R.string.cmd_block_usage))
         }
 
-        val target = args.first().toUserName()
+        val target = args.first().toCommandTargetUserName()
         val targetId =
             helixApiClient
                 .getUserIdByName(target)
                 .getOrNull() ?: return CommandResult.AcceptedWithResponse(TextResource.Res(R.string.cmd_block_not_found, persistentListOf(target.toString())))
 
-        val result = helixApiClient.blockUser(targetId)
-        return when {
-            result.isSuccess -> {
-                ignoresRepository.addUserBlock(targetId, target)
-                CommandResult.AcceptedWithResponse(TextResource.Res(R.string.cmd_block_success, persistentListOf(target.toString())))
+        val response =
+            when {
+                ignoresRepository.addUserBlock(targetId, target).isSuccess -> R.string.cmd_block_success
+                else -> R.string.cmd_block_error
             }
-
-            else -> {
-                CommandResult.AcceptedWithResponse(TextResource.Res(R.string.cmd_block_error, persistentListOf(target.toString())))
-            }
-        }
+        return CommandResult.AcceptedWithResponse(TextResource.Res(response, persistentListOf(target.toString())))
     }
 
     private suspend fun unblockUserCommand(args: List<String>): CommandResult.AcceptedWithResponse {
@@ -297,21 +295,18 @@ class CommandRepository(
             return CommandResult.AcceptedWithResponse(TextResource.Res(R.string.cmd_unblock_usage))
         }
 
-        val target = args.first().toUserName()
+        val target = args.first().toCommandTargetUserName()
         val targetId =
             helixApiClient
                 .getUserIdByName(target)
                 .getOrNull() ?: return CommandResult.AcceptedWithResponse(TextResource.Res(R.string.cmd_unblock_not_found, persistentListOf(target.toString())))
 
-        val result =
-            runCatching {
-                ignoresRepository.removeUserBlock(targetId, target)
-                CommandResult.AcceptedWithResponse(TextResource.Res(R.string.cmd_unblock_success, persistentListOf(target.toString())))
+        val response =
+            when {
+                ignoresRepository.removeUserBlock(targetId, target).isSuccess -> R.string.cmd_unblock_success
+                else -> R.string.cmd_unblock_error
             }
-
-        return result.getOrElse {
-            CommandResult.AcceptedWithResponse(TextResource.Res(R.string.cmd_unblock_error, persistentListOf(target.toString())))
-        }
+        return CommandResult.AcceptedWithResponse(TextResource.Res(response, persistentListOf(target.toString())))
     }
 
     private suspend fun uptimeCommand(channel: UserName): CommandResult.AcceptedWithResponse {
@@ -333,6 +328,7 @@ class CommandRepository(
             twitchCommandRepository
                 .getAvailableCommandTriggers(roomState, userState)
                 .plus(defaultCommandTriggers)
+                .plus(commandShortcutTriggers)
                 .joinToString(separator = " ")
 
         return CommandResult.AcceptedWithResponse(TextResource.Res(R.string.cmd_help_response, persistentListOf(commands)))

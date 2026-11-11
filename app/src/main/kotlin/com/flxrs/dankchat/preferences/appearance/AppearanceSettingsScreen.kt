@@ -2,6 +2,7 @@ package com.flxrs.dankchat.preferences.appearance
 
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Color
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.LocalActivity
@@ -82,6 +83,7 @@ import com.flxrs.dankchat.preferences.appearance.AppearanceSettingsInteraction.R
 import com.flxrs.dankchat.preferences.appearance.AppearanceSettingsInteraction.ShowCharacterCounter
 import com.flxrs.dankchat.preferences.appearance.AppearanceSettingsInteraction.ShowClearInputButton
 import com.flxrs.dankchat.preferences.appearance.AppearanceSettingsInteraction.ShowSendButton
+import com.flxrs.dankchat.preferences.appearance.AppearanceSettingsInteraction.ShowSendWaitTimer
 import com.flxrs.dankchat.preferences.appearance.AppearanceSettingsInteraction.SwipeNavigation
 import com.flxrs.dankchat.preferences.appearance.AppearanceSettingsInteraction.Theme
 import com.flxrs.dankchat.preferences.appearance.AppearanceSettingsInteraction.TrueDarkTheme
@@ -164,6 +166,7 @@ private fun AppearanceSettingsContent(
             InputCategory(
                 autoDisableInput = settings.autoDisableInput,
                 showCharacterCounter = settings.showCharacterCounter,
+                showSendWaitTimer = settings.showSendWaitTimer,
                 showClearInputButton = settings.showClearInputButton,
                 showSendButton = settings.showSendButton,
                 onInteraction = onInteraction,
@@ -185,6 +188,7 @@ private fun AppearanceSettingsContent(
 private fun InputCategory(
     autoDisableInput: Boolean,
     showCharacterCounter: Boolean,
+    showSendWaitTimer: Boolean,
     showClearInputButton: Boolean,
     showSendButton: Boolean,
     onInteraction: (AppearanceSettingsInteraction) -> Unit,
@@ -202,6 +206,12 @@ private fun InputCategory(
             summary = stringResource(R.string.preference_show_character_counter_summary),
             isChecked = showCharacterCounter,
             onClick = { onInteraction(ShowCharacterCounter(it)) },
+        )
+        SwitchPreferenceItem(
+            title = stringResource(R.string.preference_show_send_wait_timer_title),
+            summary = stringResource(R.string.preference_show_send_wait_timer_summary),
+            isChecked = showSendWaitTimer,
+            onClick = { onInteraction(ShowSendWaitTimer(it)) },
         )
         SwitchPreferenceItem(
             title = stringResource(R.string.preference_show_clear_input_button_title),
@@ -689,8 +699,8 @@ private fun setDarkMode(
         ThemePreference.System -> systemDark
     }
     val barStyle = when {
-        isDark -> SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-        else -> SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+        isDark -> SystemBarStyle.dark(Color.TRANSPARENT)
+        else -> SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
     }
     activity.enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
 }

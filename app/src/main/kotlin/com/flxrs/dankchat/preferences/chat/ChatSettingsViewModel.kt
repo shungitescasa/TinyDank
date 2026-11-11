@@ -46,12 +46,20 @@ class ChatSettingsViewModel(
                     chatSettingsDataStore.update { it.copy(customCommands = interaction.value) }
                 }
 
+                is ChatSettingsInteraction.ShowTwitchGifs -> {
+                    chatSettingsDataStore.update { it.copy(showTwitchGifs = interaction.value) }
+                }
+
                 is ChatSettingsInteraction.AnimateGifs -> {
                     chatSettingsDataStore.update { it.copy(animateGifs = interaction.value) }
                 }
 
                 is ChatSettingsInteraction.ScrollbackLength -> {
                     chatSettingsDataStore.update { it.copy(scrollbackLength = interaction.value) }
+                }
+
+                is ChatSettingsInteraction.MessageTapActionChange -> {
+                    chatSettingsDataStore.update { it.copy(messageTapAction = interaction.value) }
                 }
 
                 is ChatSettingsInteraction.ShowUsernames -> {
@@ -66,8 +74,20 @@ class ChatSettingsViewModel(
                     chatSettingsDataStore.update { it.copy(colorizeNicknames = interaction.value) }
                 }
 
+                is ChatSettingsInteraction.BoldUsernameMentions -> {
+                    chatSettingsDataStore.update { it.copy(boldUsernameMentions = interaction.value) }
+                }
+
+                is ChatSettingsInteraction.ColorUsernameMentions -> {
+                    chatSettingsDataStore.update { it.copy(colorUsernameMentions = interaction.value) }
+                }
+
                 is ChatSettingsInteraction.ShowTimedOutMessages -> {
                     chatSettingsDataStore.update { it.copy(showTimedOutMessages = interaction.value) }
+                }
+
+                is ChatSettingsInteraction.ShowWhispersInline -> {
+                    chatSettingsDataStore.update { it.copy(showWhispersInline = interaction.value) }
                 }
 
                 is ChatSettingsInteraction.ShowTimestamps -> {
@@ -152,12 +172,17 @@ private fun ChatSettings.toState() = ChatSettingsState(
     suggestionTypes = suggestionTypes.toImmutableList(),
     suggestionMode = suggestionMode,
     customCommands = customCommands.toImmutableList(),
+    showTwitchGifs = showTwitchGifs,
     animateGifs = animateGifs,
     scrollbackLength = scrollbackLength,
+    messageTapAction = messageTapAction,
     showUsernames = showUsernames,
     userLongClickBehavior = userLongClickBehavior,
     colorizeNicknames = colorizeNicknames,
+    boldUsernameMentions = boldUsernameMentions,
+    colorUsernameMentions = colorUsernameMentions,
     showTimedOutMessages = showTimedOutMessages,
+    showWhispersInline = showWhispersInline,
     showTimestamps = showTimestamps,
     timestampFormat = timestampFormat,
     visibleBadges = visibleBadges.toImmutableList(),

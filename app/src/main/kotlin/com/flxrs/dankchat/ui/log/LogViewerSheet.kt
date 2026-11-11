@@ -1,6 +1,7 @@
 package com.flxrs.dankchat.ui.log
 
 import android.content.ClipData
+import android.content.Intent
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -30,7 +31,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,6 +60,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -221,14 +223,14 @@ fun LogViewerSheet(onDismiss: () -> Unit) {
                         .fillMaxSize()
                         .nestedScroll(scrollTracker),
             ) {
-                itemsIndexed(
+                items(
                     items = state.lines,
-                    key = { index, _ -> index },
-                ) { index, line ->
+                    key = { line -> line.index },
+                ) { line ->
                     LogLineItem(
                         line = line,
-                        isSelected = index in selectedIndices,
-                        onClick = { viewModel.toggleSelection(index) },
+                        isSelected = line.index in selectedIndices,
+                        onClick = { viewModel.toggleSelection(line.index) },
                     )
                 }
             }
@@ -272,12 +274,12 @@ fun LogViewerSheet(onDismiss: () -> Unit) {
             onShare = {
                 val file = viewModel.getShareableLogFile() ?: return@LogViewerToolbar
                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                val intent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                context.startActivity(android.content.Intent.createChooser(intent, null))
+                context.startActivity(Intent.createChooser(intent, null))
             },
             onClearSelection = viewModel::clearSelection,
             onCopySelection = {
@@ -503,6 +505,7 @@ private fun LogLineItem(
 }
 
 @Composable
+@ReadOnlyComposable
 private fun formatLogLine(line: LogLine): AnnotatedString {
     if (line.timestamp.isEmpty()) {
         return AnnotatedString(line.raw)

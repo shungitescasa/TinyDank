@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -38,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -60,6 +62,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flxrs.dankchat.R
 import com.flxrs.dankchat.data.UserName
+import com.flxrs.dankchat.ui.chat.ChatScrollState
+import com.flxrs.dankchat.ui.chat.MessageTapContext
 import com.flxrs.dankchat.ui.chat.ScrollDirectionTracker
 import com.flxrs.dankchat.ui.chat.mention.MentionComposable
 import com.flxrs.dankchat.ui.chat.mention.MentionViewModel
@@ -72,16 +76,20 @@ import kotlinx.coroutines.launch
 @Composable
 fun MentionSheet(
     mentionViewModel: MentionViewModel,
-    initialisWhisperTab: Boolean,
+    initialTab: Int,
+    onTabChange: (Int) -> Unit,
+    scrollStateFor: (isWhisperTab: Boolean) -> ChatScrollState,
     onDismiss: () -> Unit,
+    backEnabled: Boolean,
     onWhisperReply: ((userName: UserName) -> Unit)? = null,
+    onReplyToMessage: (MessageTapContext) -> Unit = {},
     bottomContentPadding: Dp = 0.dp,
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val pagerState =
         rememberPagerState(
-            initialPage = if (initialisWhisperTab) 1 else 0,
+            initialPage = initialTab,
             pageCount = { 2 },
         )
     var backProgress by remember { mutableFloatStateOf(0f) }
@@ -109,7 +117,13 @@ fun MentionSheet(
 
     val whisperMentionCount by mentionViewModel.whisperMentionCount.collectAsStateWithLifecycle()
 
+    DisposableEffect(mentionViewModel) {
+        mentionViewModel.setSheetOpen(true)
+        onDispose { mentionViewModel.setSheetOpen(false) }
+    }
+
     SideEffect(pagerState.currentPage) {
+        onTabChange(pagerState.currentPage)
         mentionViewModel.setCurrentTab(pagerState.currentPage)
         when (pagerState.currentPage) {
             0 -> mentionViewModel.markMentionsRead()
@@ -121,7 +135,7 @@ fun MentionSheet(
         }
     }
 
-    PredictiveBackHandler { progress ->
+    PredictiveBackHandler(enabled = backEnabled) { progress ->
         try {
             progress.collect { event ->
                 backProgress = event.progress
@@ -136,14 +150,15 @@ fun MentionSheet(
         modifier =
             Modifier
                 .fillMaxSize()
-                .background(sheetBackgroundColor)
                 .graphicsLayer {
                     val scale = 1f - (backProgress * 0.1f)
                     scaleX = scale
                     scaleY = scale
-                    alpha = 1f - backProgress
-                    translationY = backProgress * 100f
-                },
+                    alpha = 1f - (backProgress * 0.5f)
+                    translationY = backProgress * 48.dp.toPx()
+                    shape = RoundedCornerShape(36.dp * (backProgress * 4f).coerceAtMost(1f))
+                    clip = backProgress > 0f
+                }.background(sheetBackgroundColor),
     ) {
         HorizontalPager(
             state = pagerState,
@@ -153,7 +168,9 @@ fun MentionSheet(
             MentionComposable(
                 mentionViewModel = mentionViewModel,
                 isWhisperTab = page == 1,
+                scrollState = scrollStateFor(page == 1),
                 onWhisperReply = if (page == 1) onWhisperReply else null,
+                onReplyToMessage = onReplyToMessage,
                 containerColor = sheetBackgroundColor,
                 contentPadding = PaddingValues(top = toolbarTopPadding, bottom = bottomContentPadding),
                 scrollModifier = scrollModifier,

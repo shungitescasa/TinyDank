@@ -38,12 +38,13 @@ fun MainScreenEventHandler(
     sheetNavigationViewModel: SheetNavigationViewModel,
     mainScreenViewModel: MainScreenViewModel,
     preferenceStore: DankChatPreferenceStore,
+    onJumpToMessage: (messageId: String, channel: UserName) -> Boolean,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val authStateCoordinator: AuthStateCoordinator = koinInject()
 
-    // MainEventBus event collection
+    // MainEventBus event collection, snackbars are shown in child coroutines so they never hold up later events
     LaunchedEffect(Unit) {
         mainEventBus.events.collect { event ->
             when (event) {
@@ -61,13 +62,15 @@ fun MainScreenEventHandler(
                         .getSystemService<ClipboardManager>()
                         ?.setPrimaryClip(ClipData.newPlainText("dankchat_media_url", event.url))
                     chatInputViewModel.postSystemMessage(resources.getString(R.string.system_message_upload_complete, event.url))
-                    val result = snackbarHostState.showSnackbar(
-                        message = resources.getString(R.string.snackbar_image_uploaded, event.url),
-                        actionLabel = resources.getString(R.string.snackbar_paste),
-                        duration = SnackbarDuration.Short,
-                    )
-                    if (result == SnackbarResult.ActionPerformed) {
-                        chatInputViewModel.insertText(event.url)
+                    launch {
+                        val result = snackbarHostState.showSnackbar(
+                            message = resources.getString(R.string.snackbar_image_uploaded, event.url),
+                            actionLabel = resources.getString(R.string.snackbar_paste),
+                            duration = SnackbarDuration.Short,
+                        )
+                        if (result == SnackbarResult.ActionPerformed) {
+                            chatInputViewModel.insertText(event.url)
+                        }
                     }
                 }
 
@@ -76,50 +79,58 @@ fun MainScreenEventHandler(
                     val message = event.errorMessage
                         ?.let { resources.getString(R.string.snackbar_upload_failed_cause, it) }
                         ?: resources.getString(R.string.snackbar_upload_failed)
-                    snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Short)
+                    launch { snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Short) }
                 }
 
                 is MainEvent.MessageCopied -> {
-                    val result = snackbarHostState.showSnackbar(
-                        message = resources.getString(R.string.snackbar_message_copied),
-                        actionLabel = resources.getString(R.string.snackbar_paste),
-                        duration = SnackbarDuration.Short,
-                    )
-                    if (result == SnackbarResult.ActionPerformed) {
-                        chatInputViewModel.insertText(event.text)
+                    launch {
+                        val result = snackbarHostState.showSnackbar(
+                            message = resources.getString(R.string.snackbar_message_copied),
+                            actionLabel = resources.getString(R.string.snackbar_paste),
+                            duration = SnackbarDuration.Short,
+                        )
+                        if (result == SnackbarResult.ActionPerformed) {
+                            chatInputViewModel.insertText(event.text)
+                        }
                     }
                 }
 
                 is MainEvent.MessageIdCopied -> {
-                    snackbarHostState.showSnackbar(
-                        message = resources.getString(R.string.snackbar_message_id_copied),
-                        duration = SnackbarDuration.Short,
-                    )
+                    launch {
+                        snackbarHostState.showSnackbar(
+                            message = resources.getString(R.string.snackbar_message_id_copied),
+                            duration = SnackbarDuration.Short,
+                        )
+                    }
                 }
 
                 is MainEvent.LinkCopied -> {
-                    val result = snackbarHostState.showSnackbar(
-                        message = resources.getString(R.string.snackbar_link_copied),
-                        actionLabel = resources.getString(R.string.snackbar_paste),
-                        duration = SnackbarDuration.Short,
-                    )
-                    if (result == SnackbarResult.ActionPerformed) {
-                        chatInputViewModel.insertText(event.url)
+                    launch {
+                        val result = snackbarHostState.showSnackbar(
+                            message = resources.getString(R.string.snackbar_link_copied),
+                            actionLabel = resources.getString(R.string.snackbar_paste),
+                            duration = SnackbarDuration.Short,
+                        )
+                        if (result == SnackbarResult.ActionPerformed) {
+                            chatInputViewModel.insertText(event.url)
+                        }
                     }
                 }
 
                 is MainEvent.OpenChannel -> {
                     if (event.channel == UserName.EMPTY) {
                         sheetNavigationViewModel.openWhispers()
+                        chatInputViewModel.setWhisperTarget(event.whisperTarget)
                     } else {
-                        channelTabViewModel.selectTab(
-                            preferenceStore.channels.indexOf(event.channel),
-                        )
+                        sheetNavigationViewModel.closeFullScreenSheet()
+                        val jumped = event.messageId?.let { onJumpToMessage(it, event.channel) } == true
+                        if (!jumped) {
+                            channelTabViewModel.selectTab(
+                                preferenceStore.channels.indexOf(event.channel),
+                            )
+                        }
                     }
-                    (context as? MainActivity)?.clearNotificationsOfChannel(event.channel)
                 }
-
-                else -> Unit
             }
         }
     }
