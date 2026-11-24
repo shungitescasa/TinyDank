@@ -163,7 +163,7 @@ class EmoteRepository(
                             type = emote.emoteType.toChatMessageEmoteType(),
                             isOverlayEmote = emote.isOverlayEmote,
                             lowResUrl = emote.lowResUrl.takeIf { emote.scale == 1 },
-                            instanceUrl = null,
+                            instanceUrl = emote.instanceUrl,
                         )
                 }
             }
@@ -412,9 +412,9 @@ class EmoteRepository(
     )
 
     // The cached map holds third-party emotes only, a state that differs in its other emotes still matches
-    private fun GlobalEmoteState.hasSameThirdPartyEmotes(other: GlobalEmoteState): Boolean = sevenTvEmotes === other.sevenTvEmotes && bttvEmotes === other.bttvEmotes && ffzEmotes === other.ffzEmotes
+    private fun GlobalEmoteState.hasSameThirdPartyEmotes(other: GlobalEmoteState): Boolean = sevenTvEmotes === other.sevenTvEmotes && bttvEmotes === other.bttvEmotes && ffzEmotes === other.ffzEmotes && tinyEmotes === other.tinyEmotes
 
-    private fun ChannelEmoteState.hasSameThirdPartyEmotes(other: ChannelEmoteState): Boolean = sevenTvEmotes === other.sevenTvEmotes && bttvEmotes === other.bttvEmotes && ffzEmotes === other.ffzEmotes
+    private fun ChannelEmoteState.hasSameThirdPartyEmotes(other: ChannelEmoteState): Boolean = sevenTvEmotes === other.sevenTvEmotes && bttvEmotes === other.bttvEmotes && ffzEmotes === other.ffzEmotes && tinyEmotes === other.tinyEmotes
 
     private class TwitchEmoteUrls(
         id: String,
@@ -879,6 +879,7 @@ class EmoteRepository(
                             type = emote.emoteType.toChatMessageEmoteType(),
                             isOverlayEmote = emote.isOverlayEmote,
                             lowResUrl = emote.lowResUrl.takeIf { emote.scale == 1 },
+                            instanceUrl = emote.instanceUrl,
                         )
                 }
             }
@@ -889,7 +890,7 @@ class EmoteRepository(
     suspend fun setTinyEmotes(instanceUrl: String, channel: UserName, tinyResult: TinyUserDto) = withContext(dispatchersProvider.default) {
         val tinyEmotes = tinyResult.emoteSets.find { it.id == tinyResult.activeEmoteSetId }?.emotes?.map {
             val creator = DisplayName(it.uploadedBy?.username ?: "Anonymous*")
-            parseTinyEmote(instanceUrl, it, EmoteType.ChannelTinyEmote(instanceUrl, creator, it.originalCode))
+            parseTinyEmote(instanceUrl, it, EmoteType.ChannelTinyEmote(instanceUrl, creator, it.originalCode?.takeIf { base -> base != it.code }))
         }
 
         channelEmoteStates[channel]?.update {
@@ -900,7 +901,7 @@ class EmoteRepository(
     suspend fun setTinyGlobalEmotes(instanceUrl: String, emoteSet: TinyEmotesetDto) = withContext(dispatchersProvider.default) {
         val tinyGlobalEmotes = emoteSet.emotes.map {
             val creator = DisplayName(it.uploadedBy?.username ?: "Anonymous*")
-            parseTinyEmote(instanceUrl, it, EmoteType.GlobalTinyEmote(instanceUrl, creator, it.originalCode))
+            parseTinyEmote(instanceUrl, it, EmoteType.GlobalTinyEmote(instanceUrl, creator, it.originalCode?.takeIf { base -> base != it.code }))
         }
 
         globalEmoteState.update {

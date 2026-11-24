@@ -16,6 +16,8 @@ fun EmoteSheetData.toBasicEmoteInfoItem(): EmoteInfoItem = EmoteInfoItem(
     baseName = when (type) {
         is ChatMessageEmoteType.ChannelSevenTVEmote -> type.baseName
         is ChatMessageEmoteType.GlobalSevenTVEmote -> type.baseName
+        is ChatMessageEmoteType.ChannelTinyEmote -> type.baseName
+        is ChatMessageEmoteType.GlobalTinyEmote -> type.baseName
         else -> null
     },
     creatorName = when (type) {
@@ -24,6 +26,8 @@ fun EmoteSheetData.toBasicEmoteInfoItem(): EmoteInfoItem = EmoteInfoItem(
         is ChatMessageEmoteType.ChannelBTTVEmote -> type.creator
         is ChatMessageEmoteType.ChannelFFZEmote -> type.creator
         is ChatMessageEmoteType.GlobalFFZEmote -> type.creator
+        is ChatMessageEmoteType.ChannelTinyEmote -> type.creator
+        is ChatMessageEmoteType.GlobalTinyEmote -> type.creator
         else -> null
     },
     providerUrl = when (type) {
